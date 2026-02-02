@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema Integrado de Control FPGA y Motor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Sistema Integrado de Control FPGA y Motor</h1>
+        
+        <!-- Formulario de parámetros iniciales (FPGA) - movido fuera de las pestañas -->
+        <div class="form-container">
+            <h2>Parámetros inciales (FPGA)</h2>
+            <form id="config-form">
+                <label for="num_pulsos">Número de pulsos (0 - 16777215):</label>
+                <input type="number" id="num_pulsos" min="0" max="16777215" required>
+
+                <label for="duracion_us">Duración del pulso ON:</label>
+                <div class="input-with-unit">
+                    <input type="number" id="duracion_us" min="0" max="16777215" required>
+                    <select id="duracion_unit" onchange="updateDurationRanges()">
+                        <option value="us">μs</option>
+                        <option value="ms">ms</option>
+                        <option value="s">s</option>
+                    </select>
+                </div>
+                <small id="duracion_range">Rango: 0 - 16777215 μs</small>
+
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button type="button" onclick="enviarConfiguracion()">Iniciar</button>
+                    <button type="button" onclick="abortarProtocolo()" style="background: #ce4e5b;">Abortar</button>
+                    <button type="button" onclick="downloadCSV()" style="background: #3498db;">Descargar CSV</button>
+                </div>
+                <p id="status-message"></p>
+            </form>
+        </div>
+
+        <!-- Sistema de pestañas -->
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="openTab('resumen-tab')">Resumen Estadístico</button>
+            <button class="nav-tab" onclick="openTab('tabla-tab')">Tabla de Datos</button>
+            <button class="nav-tab" onclick="openTab('clave-tab')">Generación de Clave</button>
+            <button class="nav-tab" onclick="openTab('cascade-tab')">Corrección de Errores</button>
+            <button class="nav-tab" onclick="openTab('amplification-tab')">Amplificación de Privacidad</button>
+        </div>
+        
+        <!-- Pestaña de Resumen Estadístico -->
+        <div id="resumen-tab" class="tab-content active">
+            <div class="charts-container">
+                <div class="tab-container">
+                    <div class="tabs">
+                        <button class="tab-button active histograma" onclick="cambiarGrafico('histograma')">Histograma</button>
+                        <button class="tab-button timeline" onclick="cambiarGrafico('timeline')">Línea de tiempo</button>
+                    </div>
+                </div>
+                <div class="chart-wrapper active" id="histograma-wrapper">
+                    <canvas id="histogramaCombinad"></canvas>
+                </div>
+                <div class="chart-wrapper" id="timeline-wrapper">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+                <div class="data-containers">
+                    <div class="latest-data">
+                        <h3>Última Detección</h3>
+                        <p><strong>Pulso:</strong> <span id="last-pulse">-</span></p>
+                        <p><strong>Detector 0:</strong> <span id="last-detector0">-</span></p>
+                        <p><strong>Detector 1:</strong> <span id="last-detector1">-</span></p>
+                    </div>
+                    <div class="statistics-polarization" id="statistics-H">
+                        <h3>Estadísticas H <small>(bit 0, base +)</small></h3>
+                        <p><strong>Veces enviado:</strong> <span id="sent-H">-</span></p>
+                        <p><strong>Veces recibido:</strong> <span id="received-H">-</span></p>
+                        <p><strong>Error rate:</strong> <span id="qer-H">-</span></p>
+                        <p><strong>Precisión:</strong> <span id="accuracy-H">-</span></p>
+                        <p><strong>Fotones promedio:</strong> <span id="avg-photons-H">-</span></p>
+                    </div>
+                    <div class="statistics-polarization" id="statistics-V">
+                        <h3>Estadísticas V <small>(bit 1, base +)</small></h3>
+                        <p><strong>Veces enviado:</strong> <span id="sent-V">-</span></p>
+                        <p><strong>Veces recibido:</strong> <span id="received-V">-</span></p>
+                        <p><strong>Error rate:</strong> <span id="qer-V">-</span></p>
+                        <p><strong>Precisión:</strong> <span id="accuracy-V">-</span></p>
+                        <p><strong>Fotones promedio:</strong> <span id="avg-photons-V">-</span></p>
+                    </div>
+                </div>
+                <div class="data-containers">
+                    <div class="statistics-polarization" id="statistics-D">
+                        <h3>Estadísticas D <small>(bit 0, base x)</small></h3>
+                        <p><strong>Veces enviado:</strong> <span id="sent-D">-</span></p>
+                        <p><strong>Veces recibido:</strong> <span id="received-D">-</span></p>
+                        <p><strong>Error rate:</strong> <span id="qer-D">-</span></p>
+                        <p><strong>Precisión:</strong> <span id="accuracy-D">-</span></p>
+                        <p><strong>Fotones promedio:</strong> <span id="avg-photons-D">-</span></p>
+                    </div>
+                    <div class="statistics-polarization" id="statistics-A">
+                        <h3>Estadísticas A <small>(bit 1, base x)</small></h3>
+                        <p><strong>Veces enviado:</strong> <span id="sent-A">-</span></p>
+                        <p><strong>Veces recibido:</strong> <span id="received-A">-</span></p>
+                        <p><strong>Error rate:</strong> <span id="qer-A">-</span></p>
+                        <p><strong>Precisión:</strong> <span id="accuracy-A">-</span></p>
+                        <p><strong>Fotones promedio:</strong> <span id="avg-photons-A">-</span></p>
+                    </div>
+                    <div class="statistics-global" style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); margin-top: 20px;">
+                        <h3>Estadísticas Globales</h3>
+                        <p><strong>Total de mediciones:</strong> <span id="total-measurements">-</span></p>
+                        <p><strong>Mediciones correctas:</strong> <span id="correct-measurements">-</span></p>
+                        <p><strong>Qubit Error Rate global:</strong> <span id="global-qer">-</span></p>
+                        <p><strong>Precisión global:</strong> <span id="global-accuracy">-</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pestaña de Tabla de Datos -->
+        <div id="tabla-tab" class="tab-content">
+            <h2>Tabla de Resultados</h2>
+            <table id="datos-tabla">
+                <thead>
+                    <tr>
+                        <th>Pulso</th>
+                        <th>Base Alice</th>
+                        <th>Base Bob</th>
+                        <th>Bit Enviado</th>
+                        <th>Bit Recibido</th>
+                        <th>Detector 0</th>
+                        <th>Detector 1</th>
+                    </tr>
+                </thead>
+                <tbody id="datos-cuerpo">
+                    <!-- Las filas se añadirán dinámicamente aquí -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Nueva Pestaña de Generación de Clave -->
+        <div id="clave-tab" class="tab-content">
+            <h2>Generación de Clave BB84</h2>
+            <div class="key-generation-container">
+                <p class="info-text">El protocolo BB84 utiliza los siguientes pasos para generar una clave segura:</p>
+                <ol class="bb84-steps">
+                    <li>Descartar bits medidos con bases no coincidentes</li>
+                    <li>Dividir los bits restantes en serie de validación y clave final</li>
+                    <li>Comparar la serie de validación para detectar intrusos (QBER)</li>
+                    <li>Si el QBER es menor al 15%, se considera que no hubo intrusión</li>
+                    <li>Generar la clave final con los bits no usados para validación</li>
+                </ol>
+                
+                <button id="generate-key-btn" onclick="generarClaveBB84()">Generar Clave</button>
+                
+                <div class="process-container">
+                    <div class="process-step" id="step1-container">
+                        <h3>Paso 1: Filtrado de Bases Coincidentes</h3>
+                        <div class="stats-container">
+                            <p>Total de bits originales: <span id="total-bits">-</span></p>
+                            <p>Bits con bases coincidentes: <span id="matching-bases-bits">-</span></p>
+                            <p>Eficiencia de coincidencia: <span id="matching-efficiency">-</span></p>
+                        </div>
+                        <div class="bit-representation" id="bit-visualization-1"></div>
+                    </div>
+                    
+                    <div class="process-step" id="step2-container">
+                        <h3>Paso 2: División de la Serie</h3>
+                        <div class="stats-container">
+                            <p>Bits para validación: <span id="validation-bits-count">-</span></p>
+                            <p>Bits para clave final: <span id="key-bits-count">-</span></p>
+                        </div>
+                        <div class="series-container">
+                            <div>
+                                <h4>Serie de Validación</h4>
+                                <div class="bit-representation" id="validation-bits"></div>
+                            </div>
+                            <div>
+                                <h4>Serie de Clave</h4>
+                                <div class="bit-representation" id="key-bits"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="process-step" id="step3-container">
+                        <h3>Paso 3: Validación y Detección de Intrusos</h3>
+                        <div class="stats-container">
+                            <p>Errores en bits de validación: <span id="validation-errors">-</span></p>
+                            <p>QBER (Quantum Bit Error Rate): <span id="qber-value">-</span></p>
+                            <p>Estado de la transmisión: <span id="transmission-status">-</span></p>
+                        </div>
+                    </div>
+                    
+                    <div class="process-step" id="step4-container">
+                        <h3>Paso 4: Claves Finales Generadas</h3>
+                        <div class="final-key-container">
+                            <p>Longitud de las claves: <span id="key-length">-</span> bits</p>
+                            
+                            <!-- Nuevo contenedor para visualización sincronizada -->
+                            <div class="synchronized-keys-container">
+                                <div class="key-labels">
+                                    <div class="key-label">Clave de Alice (bits enviados):</div>
+                                    <div class="key-label">Clave de Bob (bits recibidos):</div>
+                                </div>
+                                <div class="keys-wrapper">
+                                    <div class="bit-representation" id="alice-key-bits"></div>
+                                    <div class="bit-representation" id="bob-key-bits"></div>
+                                </div>
+                            </div>
+                            
+                            <div class="key-comparison">
+                                <div class="key-block">
+                                    <h4>Clave de Alice en formato hexadecimal:</h4>
+                                    <div class="hex-key" id="alice-key-hex">-</div>
+                                    <button id="copy-alice-key-btn" onclick="copiarClaveAlPortapapeles('alice')">Copiar Clave de Alice</button>
+                                </div>
+                                
+                                <div class="key-block">
+                                    <h4>Clave de Bob en formato hexadecimal:</h4>
+                                    <div class="hex-key" id="bob-key-hex">-</div>
+                                    <button id="copy-bob-key-btn" onclick="copiarClaveAlPortapapeles('bob')">Copiar Clave de Bob</button>
+                                </div>
+                            </div>
+                            
+                            <div class="key-stats">
+                                <p>Diferencias entre claves: <span id="key-differences">-</span> bits</p>
+                                <p>Porcentaje de coincidencia: <span id="key-match-percentage">-</span></p>
+                            </div>
+                            
+                            <button id="save-keys-btn" onclick="guardarClaveComoArchivo()">Guardar Ambas Claves</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Nueva sección para demostración de encriptación -->
+                    <div class="process-step" id="step5-container">
+                        <h3>Demostración de Uso de la Clave</h3>
+                        <div class="encryption-demo-container">
+                            <p class="info-text">Esta demostración usa las claves generadas para encriptar y desencriptar un mensaje usando operación XOR.</p>
+                            
+                            <div class="encryption-form">
+                                <label for="plain-text">Introduce un mensaje para encriptar:</label>
+                                <div class="textarea-with-counter">
+                                    <textarea id="plain-text" placeholder="Escribe un mensaje..." oninput="actualizarContadorOriginal()"></textarea>
+                                    <div class="character-counter">
+                                        <span id="char-count">0</span>/<span id="max-chars">0</span> caracteres
+                                    </div>
+                                </div>
+                                <button id="encrypt-btn" onclick="demostrarEncriptacion()">Encriptar y Desencriptar</button>
+                            </div>
+                            
+                            <div class="encryption-results">
+                                <div class="result-block">
+                                    <h4>Mensaje Original:</h4>
+                                    <div class="result-content" id="original-message">-</div>
+                                </div>
+                                
+                                <div class="result-block">
+                                    <h4>Mensaje Encriptado con clave de Alice:</h4>
+                                    <div class="result-content" id="encrypted-message">-</div>
+                                    <button id="copy-encrypted-btn" onclick="copiarTextoAlPortapapeles('encrypted-message')">Copiar</button>
+                                </div>
+                                
+                                <div class="result-block">
+                                    <h4>Mensaje Desencriptado con clave de Bob:</h4>
+                                    <div class="result-content" id="decrypted-message">-</div>
+                                </div>
+                                
+                                <div class="result-block error-block" id="decryption-error-container" style="display: none;">
+                                    <h4>Advertencia:</h4>
+                                    <div class="result-content" id="decryption-error">-</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nueva Pestaña de Corrección de Errores con Cascade -->
+        <div id="cascade-tab" class="tab-content">
+            <h2>Corrección de Errores - Algoritmo Cascade</h2>
+            <div class="cascade-container">
+                <p class="info-text">El algoritmo Cascade permite corregir errores entre las claves de Alice y Bob mediante la comparación de paridades de bloques, minimizando la información filtrada a posibles espías.</p>
+                
+                <div class="cascade-intro">
+                    <ol class="cascade-steps">
+                        <li>Las claves se dividen en bloques de bits</li>
+                        <li>Alice y Bob calculan y comparan la paridad de cada bloque</li>
+                        <li>Si un bloque tiene paridad diferente, se aplica búsqueda binaria para encontrar el bit incorrecto</li>
+                        <li>El proceso se repite con diferentes tamaños de bloques para detectar más errores</li>
+                    </ol>
+                </div>
+                
+                <div class="cascade-controls">
+                    <button id="start-cascade-btn" onclick="iniciarCascade()">Iniciar Corrección Cascade</button>
+                    
+                    <div class="cascade-params">
+                        <label for="block-size">Tamaño de bloque inicial:</label>
+                        <input type="number" id="block-size" min="2" max="20" value="8">
+                        
+                        <label for="num-passes">Número de pasadas:</label>
+                        <input type="number" id="num-passes" min="1" max="4" value="2">
+                    </div>
+                </div>
+                
+                <div class="cascade-workflow">
+                    <div class="cascade-step active" id="cascade-step1">
+                        <h3>Paso 1: Preparación de Claves</h3>
+                        <div class="key-display-section">
+                            <div class="key-row">
+                                <div class="key-label">Clave de Alice:</div>
+                                <div class="cascade-bits" id="cascade-alice-key"></div>
+                            </div>
+                            <div class="key-row">
+                                <div class="key-label">Clave de Bob:</div>
+                                <div class="cascade-bits" id="cascade-bob-key"></div>
+                            </div>
+                        </div>
+                        <div class="error-stats">
+                            <p>Bits diferentes: <span id="initial-diff-count">0</span> de <span id="total-key-bits">0</span> (<span id="initial-error-rate">0.00</span>%)</p>
+                        </div>
+                        <div class="cascade-actions">
+                            <button class="action-btn" onclick="avanzarCascade(2)">Continuar</button>
+                            <button class="action-btn skip-btn" id="skip-cascade-btn" onclick="saltarProcesoCascade()">Saltar al Resultado Final</button>
+                        </div>
+                    </div>
+                    
+                    <div class="cascade-step" id="cascade-step2">
+                        <h3>Paso 2: División en Bloques (Pasada <span id="current-pass">1</span>)</h3>
+                        <div class="blocks-container" id="blocks-visualization"></div>
+                        <div class="parity-comparison">
+                            <table id="parity-table">
+                                <thead>
+                                    <tr>
+                                        <th>Bloque</th>
+                                        <th>Paridad Alice</th>
+                                        <th>Paridad Bob</th>
+                                        <th>¿Diferente?</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="parity-table-body">
+                                    <!-- Se llena dinámicamente -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="cascade-actions">
+                            <button class="action-btn" onclick="avanzarCascade(3)">Buscar Errores</button>
+                            <button class="action-btn skip-btn" onclick="saltarProcesoCascade()">Saltar al Resultado Final</button>
+                        </div>
+                    </div>
+                    
+                    <div class="cascade-step" id="cascade-step3">
+                        <h3>Paso 3: Búsqueda Binaria de Errores</h3>
+                        <div class="binary-search-container">
+                            <div class="binary-search-visualization" id="binary-search-viz"></div>
+                            <div class="binary-search-log" id="binary-search-log">
+                                <p class="log-title">Registro de Correcciones:</p>
+                                <div id="correction-log"></div>
+                            </div>
+                        </div>
+                        <div class="cascade-actions">
+                            <button class="action-btn" id="next-block-btn" onclick="corregirSiguienteBloque()">Corregir Siguiente Bloque</button>
+                            <button class="action-btn" id="next-pass-btn" style="display:none" onclick="iniciarSiguientePasada()">Iniciar Siguiente Pasada</button>
+                            <button class="action-btn" id="finalize-btn" style="display:none" onclick="finalizarCascade()">Finalizar Corrección</button>
+                            <button class="action-btn skip-btn" onclick="saltarProcesoCascade()">Saltar al Resultado Final</button>
+                        </div>
+                    </div>
+                    
+                    <div class="cascade-step" id="cascade-step4">
+                        <h3>Resultados de la Corrección</h3>
+                        <div class="cascade-results">
+                            <div class="key-comparison">
+                                <div class="key-block">
+                                    <h4>Clave de Alice:</h4>
+                                    <div class="cascade-bits" id="final-alice-key"></div>
+                                </div>
+                                <div class="key-block">
+                                    <h4>Clave de Bob (Corregida):</h4>
+                                    <div class="cascade-bits" id="final-bob-key"></div>
+                                </div>
+                            </div>
+                            <div class="stats-container">
+                                <p>Bits corregidos: <span id="corrected-bits-count">0</span></p>
+                                <p>Errores restantes: <span id="remaining-errors">0</span></p>
+                                <p>Eficiencia de corrección: <span id="correction-efficiency">0%</span></p>
+                                <p>Información filtrada: <span id="leaked-information">0%</span></p>
+                            </div>
+                            <div class="final-keys">
+                                <div class="key-block">
+                                    <h4>Clave final (Hexadecimal):</h4>
+                                    <div class="hex-key" id="final-hex-key">-</div>
+                                    <button id="copy-final-key-btn" onclick="copiarClaveFinal()">Copiar Clave Final</button>
+                                </div>
+                            </div>
+                            <button id="save-corrected-key-btn" onclick="guardarClaveCorregida()">Guardar Clave Corregida</button>
+                        </div>
+                        
+                        <!-- Nueva sección sobre implicaciones de seguridad de Cascade -->
+                        <div class="security-implications">
+                            <h4>Implicaciones de Seguridad del Algoritmo Cascade</h4>
+                            <div class="implications-container">
+                                <div class="implication-item">
+                                    <h5>Filtración de Información</h5>
+                                    <p>Durante el proceso de corrección, Alice y Bob intercambian información de paridad de bloques. Esta información puede ser interceptada por un espía y usada para deducir bits de la clave.</p>
+                                </div>
+                                <div class="implication-item">
+                                    <h5>Compromiso entre Corrección y Seguridad</h5>
+                                    <p>A mayor tamaño de bloque, menos información se filtra pero la eficiencia de corrección disminuye. Con bloques más pequeños se corrigen más errores pero se filtra más información.</p>
+                                </div>
+                                <div class="implication-item">
+                                    <h5>Necesidad de Amplificación de Privacidad</h5>
+                                    <p>Debido a la información filtrada durante la corrección de errores, es fundamental aplicar una etapa de amplificación de privacidad después de Cascade para asegurar la seguridad de la clave final.</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Nueva sección para demostración de encriptación con clave corregida -->
+                        <div class="corrected-key-demo">
+                            <h3>Demostración de Uso de la Clave Corregida</h3>
+                            <div class="encryption-demo-container">
+                                <p class="info-text">Esta demostración usa la clave corregida para encriptar y desencriptar un mensaje usando operación XOR.</p>
+                                
+                                <div class="encryption-form">
+                                    <label for="corrected-plain-text">Introduce un mensaje para encriptar:</label>
+                                    <div class="textarea-with-counter">
+                                        <textarea id="corrected-plain-text" placeholder="Escribe un mensaje..." oninput="actualizarContadorCorregido()"></textarea>
+                                        <div class="character-counter">
+                                            <span id="corrected-char-count">0</span>/<span id="corrected-max-chars">0</span> caracteres
+                                        </div>
+                                    </div>
+                                    <button id="corrected-encrypt-btn" onclick="demostrarEncriptacionCorregida()">Encriptar y Desencriptar</button>
+                                </div>
+                                
+                                <div class="encryption-results">
+                                    <div class="result-block">
+                                        <h4>Mensaje Original:</h4>
+                                        <div class="result-content" id="corrected-original-message">-</div>
+                                    </div>
+                                    
+                                    <div class="result-block">
+                                        <h4>Mensaje Encriptado con clave corregida:</h4>
+                                        <div class="result-content" id="corrected-encrypted-message">-</div>
+                                        <button id="copy-corrected-encrypted-btn" onclick="copiarTextoCorregido('corrected-encrypted-message')">Copiar</button>
+                                    </div>
+                                    
+                                    <div class="result-block">
+                                        <h4>Mensaje Desencriptado con clave corregida:</h4>
+                                        <div class="result-content" id="corrected-decrypted-message">-</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nueva Pestaña de Amplificación de Privacidad -->
+        <div id="amplification-tab" class="tab-content">
+            <h2>Amplificación de Privacidad</h2>
+            <div class="amplification-container">
+                <p class="info-text">La amplificación de privacidad reduce la información que un espía podría tener sobre la clave final, aplicando transformaciones que aumentan su entropía.</p>
+                
+                <div class="amplification-intro">
+                    <ol class="amplification-steps">
+                        <li>Partir de una clave ya corregida (idealmente usando Cascade)</li>
+                        <li>Aplicar una función hash para comprimir la clave</li>
+                        <li>Extraer una subclave con mayor entropía por bit</li>
+                        <li>Obtener una clave final más corta pero más segura</li>
+                    </ol>
+                </div>
+                
+                <div class="amplification-controls">
+                    <button id="start-amplification-btn" onclick="iniciarAmplificacion()">Iniciar Amplificación de Privacidad</button>
+                    
+                    <div class="amplification-params">
+                        <label for="compression-ratio">Ratio de compresión:</label>
+                        <select id="compression-ratio">
+                            <option value="0.75">75% (estándar)</option>
+                            <option value="0.5">50% (alta seguridad)</option>
+                            <option value="0.25">25% (máxima seguridad)</option>
+                        </select>
+                        
+                        <label for="hash-method">Método de hash:</label>
+                        <select id="hash-method">
+                            <option value="toeplitz">Matriz Toeplitz</option>
+                            <option value="universal2">Universal-2</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="amplification-workflow">
+                    <div class="amplification-step active" id="amplification-step1">
+                        <h3>Paso 1: Preparación de la Clave Inicial</h3>
+                        <div class="key-display-section">
+                            <div class="key-row">
+                                <div class="key-label">Clave corregida:</div>
+                                <div class="amplification-bits" id="initial-key"></div>
+                            </div>
+                        </div>
+                        <div class="error-stats">
+                            <p>Longitud de clave inicial: <span id="initial-key-length">0</span> bits</p>
+                            <p>Bits a extraer: <span id="bits-to-extract">0</span> bits</p>
+                        </div>
+                        <button class="action-btn" onclick="avanzarAmplificacion(2)">Continuar</button>
+                    </div>
+                    
+                    <div class="amplification-step" id="amplification-step2">
+                        <h3>Paso 2: Generación de Matriz Hash</h3>
+                        <p class="step-description">Para la amplificación de privacidad, se utiliza una matriz hash aleatoria que transforma la clave inicial en una clave final más segura.</p>
+                        
+                        <div class="matrix-visualization">
+                            <div id="matrix-container"></div>
+                        </div>
+                        
+                        <div class="matrix-info">
+                            <p>Método: <span id="hash-method-display">-</span></p>
+                            <p>Dimensiones: <span id="matrix-dimensions">-</span></p>
+                        </div>
+                        
+                        <button class="action-btn" onclick="avanzarAmplificacion(3)">Aplicar Hash</button>
+                    </div>
+                    
+                    <div class="amplification-step" id="amplification-step3">
+                        <h3>Paso 3: Aplicación de Función Hash</h3>
+                        <div class="hash-process-visualization">
+                            <div class="process-row">
+                                <div class="process-label">Clave inicial:</div>
+                                <div class="bits-row" id="hash-input-key"></div>
+                            </div>
+                            <div class="process-animation" id="hash-animation">
+                                <div class="animation-placeholder">
+                                    <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICAgIDxkZWZzPgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZ3JhZCIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMCUiPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojOWMyN2IwO3N0b3Atb3BhY2l0eToxIiAvPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwNTRiNzk7c3RvcC1vcGFjaXR5OjEiIC8+CiAgICAgICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDwvZGVmcz4KICAgIDxnPgogICAgICAgIDxwYXRoIGZpbGw9InVybCgjZ3JhZCkiIGQ9Ik01MCwxMCBMOTAsNTAgTDUwLDkwIEwxMCw1MCBaIj48L3BhdGg+CiAgICAgICAgPHBhdGggZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBkPSJNMzAsMzUgTDcwLDY1Ij48L3BhdGg+CiAgICAgICAgPHBhdGggZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBkPSJNMzAsNjUgTDcwLDM1Ij48L3BhdGg+CiAgICA8L2c+Cjwvc3ZnPg==" alt="Hash Function" width="80" height="80">
+                                </div>
+                            </div>
+                            <div class="process-row">
+                                <div class="process-label">Clave hash:</div>
+                                <div class="bits-row" id="hash-output-key"></div>
+                            </div>
+                        </div>
+                        <button class="action-btn" onclick="avanzarAmplificacion(4)">Extraer Clave Final</button>
+                    </div>
+                    
+                    <div class="amplification-step" id="amplification-step4">
+                        <h3>Paso 4: Clave Final Amplificada</h3>
+                        <div class="amplification-results">
+                            <div class="final-key-display">
+                                <h4>Clave amplificada:</h4>
+                                <div class="amplification-bits" id="final-amplified-key"></div>
+                            </div>
+                            <div class="stats-container">
+                                <p>Longitud original: <span id="original-length">0</span> bits</p>
+                                <p>Longitud final: <span id="final-length">0</span> bits</p>
+                                <p>Bits sacrificados: <span id="sacrificed-bits-percentage">0%</span></p>
+                                <p>Entropía estimada por bit: <span id="entropy-per-bit">0</span></p>
+                            </div>
+                            <div class="final-keys">
+                                <div class="key-block">
+                                    <h4>Clave final (Hexadecimal):</h4>
+                                    <div class="hex-key" id="amplified-hex-key">-</div>
+                                    <button id="copy-amplified-key-btn" onclick="copiarClaveAmplificada()">Copiar Clave Amplificada</button>
+                                </div>
+                            </div>
+                            <button id="save-amplified-key-btn" onclick="guardarClaveAmplificada()">Guardar Clave Amplificada</button>
+                        </div>
+                        
+                        <!-- Nueva sección sobre implicaciones de seguridad de Amplificación -->
+                        <div class="security-implications">
+                            <h4>Implicaciones de Seguridad de la Amplificación de Privacidad</h4>
+                            <div class="implications-container">
+                                <div class="implication-item">
+                                    <h5>Reducción de Conocimiento del Espía</h5>
+                                    <p>La amplificación de privacidad "diluye" cualquier información que un espía pudiera haber obtenido durante la transmisión o corrección de errores, reduciendo esta información a niveles insignificantes.</p>
+                                </div>
+                                <div class="implication-item">
+                                    <h5>Compromiso entre Longitud y Seguridad</h5>
+                                    <p>Al reducir la longitud de la clave, sacrificamos cantidad por calidad. Cuanto más corta sea la clave final (menor ratio de compresión), mayor será la seguridad de cada bit resultante.</p>
+                                </div>
+                                <div class="implication-item">
+                                    <h5>Universalidad y Resistencia a Ataques</h5>
+                                    <p>Las funciones hash usadas en la amplificación son universalmente seguras, lo que significa que son efectivas contra cualquier estrategia de espionaje, incluso aquellas desconocidas en la actualidad.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Nueva sección para demostración de encriptación con clave amplificada -->
+                    <div class="amplification-step" id="amplification-step5">
+                        <h3>Demostración de Uso de la Clave Amplificada</h3>
+                        <div class="encryption-demo-container">
+                            <p class="info-text">Esta demostración usa la clave amplificada para encriptar y desencriptar un mensaje usando operación XOR.</p>
+                            
+                            <div class="encryption-form">
+                                <label for="amplified-plain-text">Introduce un mensaje para encriptar:</label>
+                                <div class="textarea-with-counter">
+                                    <textarea id="amplified-plain-text" placeholder="Escribe un mensaje..." oninput="actualizarContadorAmplificado()"></textarea>
+                                    <div class="character-counter">
+                                        <span id="amplified-char-count">0</span>/<span id="amplified-max-chars">0</span> caracteres
+                                    </div>
+                                </div>
+                                <button id="amplified-encrypt-btn" onclick="demostrarEncriptacionAmplificada()">Encriptar y Desencriptar</button>
+                            </div>
+                            
+                            <div class="encryption-results">
+                                <div class="result-block">
+                                    <h4>Mensaje Original:</h4>
+                                    <div class="result-content" id="amplified-original-message">-</div>
+                                </div>
+                                
+                                <div class="result-block">
+                                    <h4>Mensaje Encriptado con clave amplificada:</h4>
+                                    <div class="result-content" id="amplified-encrypted-message">-</div>
+                                    <button id="copy-amplified-encrypted-btn" onclick="copiarTextoAmplificado('amplified-encrypted-message')">Copiar</button>
+                                </div>
+                                
+                                <div class="result-block">
+                                    <h4>Mensaje Desencriptado con clave amplificada:</h4>
+                                    <div class="result-content" id="amplified-decrypted-message">-</div>
+                                </div>
+                                
+                                <div class="security-info">
+                                    <h4>Análisis de Seguridad:</h4>
+                                    <p>La amplificación de privacidad incrementa la seguridad de la clave al reducir el conocimiento que un espía pueda tener sobre ella.</p>
+                                    <p>Este proceso reduce la longitud de la clave pero aumenta su entropía por bit, resultando en una clave más corta pero más segura.</p>
+                                    <p>Si había algún bit conocido por un espía en la clave original, la amplificación de privacidad hace que esta información sea inútil para predecir la clave final.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+    <script src="scriptPost.js"></script>
+    <script src="scriptCascade.js"></script>
+</body>
+</html>

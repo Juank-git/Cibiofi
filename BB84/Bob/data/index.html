@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BOB - Control Motor</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <link rel="stylesheet" href="/style.css">
+  <meta http-equiv="Cache-control" content="no-cache">
+</head>
+<body>
+  <main class="card">
+    <h1>BOB - Control Motor</h1>
+    
+    <div class="status-row">
+      <div>
+        <span id="ws-status" class="badge badge--red">Desconectado</span>
+        <span id="homed-status" class="badge badge--red">Sin Homing</span>
+      </div>
+      <div id="current-angle">Ángulo: --</div>
+    </div>
+
+    <section class="controls">
+      <!-- Sección Homing -->
+      <div class="control-group">
+        <label>🏠 Homing</label>
+        <div class="buttons">
+          <button id="btn-home" class="btn">Ejecutar Homing</button>
+        </div>
+        <div class="info-text">Buscar posición 0° con sensor Hall</div>
+      </div>
+
+      <!-- Sección Movimiento Manual -->
+      <div class="control-group">
+        <label for="angle">📐 Movimiento Manual</label>
+        <input id="angle" type="number" min="-360" max="360" value="0" step="0.1" placeholder="Ángulo en grados">
+        <div class="buttons">
+          <button id="btn-move" class="btn">Mover a Ángulo</button>
+          <button id="btn-angle-0" class="btn btn--muted">0°</button>
+          <button id="btn-angle-1395" class="btn btn--muted">13.95°</button>
+          <button id="btn-angle-3645" class="btn btn--muted">36.45°</button>
+        </div>
+      </div>
+
+      <!-- Sección Protocolo BB84 -->
+      <div class="control-group">
+        <label for="pulseNum">🔐 Protocolo BB84</label>
+        <input id="pulseNum" type="number" min="0" max="10000" value="1" placeholder="Número de pulso">
+        <div class="buttons">
+          <button id="btn-prepare" class="btn">PREPARE (Próximo Pulso)</button>
+          <button id="btn-abort" class="btn btn--danger">ABORT (Detener)</button>
+        </div>
+        <div class="info-text">PREPARE selecciona base aleatoria y posiciona el motor</div>
+      </div>
+
+      <!-- Log de mensajes -->
+      <div class="control-group">
+        <label>📋 Log de Mensajes</label>
+        <div id="log" class="log">Esperando conexión WebSocket...</div>
+        <button id="btn-clear-log" class="btn btn--muted btn--small">Limpiar Log</button>
+      </div>
+    </section>
+
+    <footer>
+      <strong>Comandos disponibles:</strong><br>
+      • <code>HOME</code>: Calibración con sensor Hall<br>
+      • <code>PREPARE</code>: Preparar para recibir pulso (base aleatoria)<br>
+      • <code>MOVE</code>: Mover a ángulo específico<br>
+      • <code>ABORT</code>: Detener protocolo
+    </footer>
+  </main>
+
+  <script>
+  (function(){
+    const angleInput = document.getElementById('angle');
+    const pulseNumInput = document.getElementById('pulseNum');
+    const btnMove = document.getElementById('btn-move');
+    const btnHome = document.getElementById('btn-home');
+    const btnPrepare = document.getElementById('btn-prepare');
+    const btnAbort = document.getElementById('btn-abort');
+    const btnAngle0 = document.getElementById('btn-angle-0');
+    const btnAngle1395 = document.getElementById('btn-angle-1395');
+    const btnAngle3645 = document.getElementById('btn-angle-3645');
+    const btnClearLog = document.getElementById('btn-clear-log');
+    const wsStatus = document.getElementById('ws-status');
+    const homedStatus = document.getElementById('homed-status');
+    const currentAngleEl = document.getElementById('current-angle');
+    const logEl = document.getElementById('log');
+
+    const host = location.hostname;
+    const wsUrl = 'ws://' + host + ':81/';
+
+    let ws = null;
+    let isHomed = false;
+
+    function addLog(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = type === 'sent' ? '📤' : type === 'received' ? '📥' : 'ℹ️';
+      logEl.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStatus(connected) {
+      if (connected) {
+        wsStatus.className = 'badge badge--green';
+        wsStatus.textContent = 'Conectado';
+      } else {
+        wsStatus.className = 'badge badge--red';
+        wsStatus.textContent = 'Desconectado';
+      }
+    }
+
+    function updateHomedStatus(homed) {
+      isHomed = homed;
+      if (homed) {
+        homedStatus.className = 'badge badge--green';
+        homedStatus.textContent = 'Homed ✓';
+      } else {
+        homedStatus.className = 'badge badge--red';
+        homedStatus.textContent = 'Sin Homing';
+      }
+    }
+
+    function connect() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+      
+      addLog('Conectando a ' + wsUrl);
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = function(){
+        addLog('Conexión WebSocket establecida');
+        updateStatus(true);
+      };
+      
+      ws.onclose = function(){
+        addLog('Conexión WebSocket cerrada');
+        updateStatus(false);
+        ws = null;
+        // Reintentar conexión
+        setTimeout(connect, 3000);
+      };
+      
+      ws.onerror = function(err){
+        addLog('Error WebSocket: ' + err.message);
+        updateStatus(false);
+      };
+      
+      ws.onmessage = function(event){
+        try {
+          const data = JSON.parse(event.data);
+          addLog('Recibido: ' + JSON.stringify(data), 'received');
+          
+          // Actualizar estado según respuesta
+          if (data.status === 'HOME_COMPLETE') {
+            updateHomedStatus(true);
+            if (data.angle !== undefined) {
+              currentAngleEl.textContent = 'Ángulo: ' + data.angle.toFixed(2) + '°';
+            }
+          } else if (data.status === 'READY') {
+            addLog(`✓ Listo para pulso ${data.pulseNum} - Base: ${data.base}, Ángulo: ${data.angle.toFixed(2)}°`);
+            if (data.angle !== undefined) {
+              currentAngleEl.textContent = 'Ángulo: ' + data.angle.toFixed(2) + '°';
+            }
+          } else if (data.status === 'MOVED') {
+            if (data.angle !== undefined) {
+              currentAngleEl.textContent = 'Ángulo: ' + data.angle.toFixed(2) + '°';
+            }
+          } else if (data.status === 'ERROR') {
+            addLog('❌ Error: ' + data.message);
+          }
+        } catch(e) {
+          addLog('Mensaje recibido (no JSON): ' + event.data, 'received');
+        }
+      };
+    }
+
+    function sendCommand(cmd, params = {}) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addLog('⚠️ WebSocket no conectado. Intentando reconectar...');
+        connect();
+        setTimeout(() => sendCommand(cmd, params), 1000);
+        return;
+      }
+      
+      const command = { cmd: cmd, ...params };
+      const jsonStr = JSON.stringify(command);
+      addLog('Enviado: ' + jsonStr, 'sent');
+      ws.send(jsonStr);
+    }
+
+    // Event listeners
+    btnHome.addEventListener('click', function(){
+      sendCommand('HOME');
+    });
+
+    btnMove.addEventListener('click', function(){
+      const angle = parseFloat(angleInput.value) || 0;
+      sendCommand('MOVE', { angle: angle });
+    });
+
+    btnPrepare.addEventListener('click', function(){
+      const pulseNum = parseInt(pulseNumInput.value) || 1;
+      sendCommand('PREPARE', { pulseNum: pulseNum });
+    });
+
+    btnAbort.addEventListener('click', function(){
+      sendCommand('ABORT');
+    });
+
+    btnAngle0.addEventListener('click', function(){
+      angleInput.value = 0;
+      sendCommand('MOVE', { angle: 0 });
+    });
+
+    btnAngle1395.addEventListener('click', function(){
+      angleInput.value = 13.95;
+      sendCommand('MOVE', { angle: 13.95 });
+    });
+
+    btnAngle3645.addEventListener('click', function(){
+      angleInput.value = 36.45;
+      sendCommand('MOVE', { angle: 36.45 });
+    });
+
+    btnClearLog.addEventListener('click', function(){
+      logEl.textContent = '';
+      addLog('Log limpiado');
+    });
+
+    // Permitir Enter en los inputs
+    angleInput.addEventListener('keypress', function(e){
+      if (e.key === 'Enter') btnMove.click();
+    });
+
+    pulseNumInput.addEventListener('keypress', function(e){
+      if (e.key === 'Enter') btnPrepare.click();
+    });
+
+    // Iniciar conexión al cargar
+    connect();
+  })();
+  </script>
+</body>
+</html>
