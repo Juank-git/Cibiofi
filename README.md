@@ -14,6 +14,6 @@ Luego se inserta el **(4) microcontrolador ESP32-C3 Super Mini** en los pines ce
 
 #### Ejemplo de montaje completo
 
-![Montaje con componentes ubicados](docs/images/montaje_con_componentes.png)
+![Montaje con componentes ubicados](docs/images/montaje_con_componentes.jpg)
 
 *Imagen de referencia mostrando la PCB con todos los componentes correctamente instalados.*
