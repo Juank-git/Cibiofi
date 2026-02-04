@@ -4,13 +4,37 @@ Proyecto de implementación del protocolo BB84 para distribución de claves cuá
 
 ## Manual de Usuario
 
-### Montaje de la PCB
+### Guía de Montaje - PCB para Control de Motores Paso a Paso
 
-![Montaje de la PCB](docs/images/montaje_pcb.jpg)
 
-Primero se instala el **(1) regulador de voltaje step-down**, ya que es el encargado de convertir la tensión de entrada a 5 V estables para la placa. Después se conecta la **(2) fuente de alimentación externa** al conector de la PCB, que será la que alimente todo el sistema a través del regulador. A continuación, se verifica la **(3) resistencia de 10 kΩ**: en algunas placas ya viene soldada, pero si no está presente, debe colocarse porque es el valor recomendado por el fabricante del sensor para que funcione correctamente.
+#### Paso 1: Conexión del regulador y la fuente de alimentación
 
-Luego se inserta el **(4) microcontrolador ESP32-C3 Super Mini** en los pines centrales respetando la orientación del conector USB. Después se coloca el **(5) driver TMC2130**, encargado del control de los motores paso a paso. Seguidamente se conectan los **(6) cables del sensor de efecto Hall** en los pines indicados (3.3 V, GND y señal). Finalmente, se conectan los **(7) cables de salida hacia los motores**, completando así el montaje físico del sistema sobre la PCB.
+Primero se conecta el regulador LM2596 **(1)** a la fuente de alimentación externa DC **(2)**. El regulador actúa como un protector: al recibir primero la energía, la transforma y estabiliza antes de que llegue a los componentes sensibles de la placa, evitando posibles daños por voltajes incorrectos.
+
+![Paso 1](docs/images/montaje_paso1.jpg)
+
+#### Paso 2: Ajuste del voltaje de salida del regulador
+
+Con la fuente ya conectada, se verifica que el regulador entregue exactamente 5V:
+
+- Se usa un multímetro en modo voltaje DC **(3)**
+- Se colocan sus puntas en los terminales de salida del regulador
+- Con un destornillador de pala, se gira el trimmer **(4)** del regulador hasta que el multímetro muestre 5.0V
+- **No se debe conectar ningún otro componente hasta completar este ajuste**
+
+[Paso 2](docs/images/montaje_paso2.jpg)
+
+#### Paso 3: Ubicación de componentes
+
+Se instalan los demás elementos respetando cuidadosamente su orientación:
+
+- La **(5) resistencia de 10 kΩ** (en caso de no estar soldada en la placa, su orientación no es relevante)
+- El **(6) microcontrolador ESP32-C3 Super Mini**, alineando el conector USB
+- El **(7) driver TMC2130**, alineando las 3 ranuras inferiores
+- Los **(8) cables del sensor de efecto Hall** (5V, GND, Señal)
+- Los **(9) cables hacia los motores paso a paso**, guiandose por los colores indicados sobre la placa.
+
+[Paso 3](docs/images/montaje_paso3.jpg)
 
 #### Ejemplo de montaje completo
 
