@@ -19,7 +19,7 @@ Con la fuente ya conectada, se verifica que el regulador entregue exactamente 5V
 
 - Se usa un multímetro en modo voltaje DC **(3)**
 - Se colocan sus puntas en los terminales de salida del regulador, la punta roja en el terminal positivo (OUT+) y la punta negra en el terminal negativo (OUT-)
-- Con un destornillador de pala, se gira el trimmer **(4)** del regulador hasta que el multímetro muestre 5.0V
+- Con un destornillador de pala, se gira el trimmer del regulador **(4)** hasta que el multímetro muestre 5.0V
 - **No se debe conectar ningún otro componente hasta completar este ajuste**
 
 ![Paso 2](docs/images/montaje_paso2.jpg)
@@ -28,11 +28,11 @@ Con la fuente ya conectada, se verifica que el regulador entregue exactamente 5V
 
 Una vez verificado el voltaje de salida del regulador se ubican los demás componentes respetando cuidadosamente su orientación:
 
-- La **(5) resistencia de 10 kΩ** (en caso de no estar soldada en la placa), su orientación no es relevante
-- El **(6) microcontrolador ESP32-C3 Super Mini**, alineando el conector USB
-- El **(7) driver TMC2130**, alineando las 3 ranuras inferiores
-- Los **(8) cables del sensor de efecto Hall** (5V, GND, Señal)
-- Los **(9) cables hacia los motores paso a paso**, guiandose por los colores indicados sobre la placa.
+- La **resistencia de 10 kΩ (5)** (en caso de no estar soldada en la placa), su orientación no es relevante
+- El **microcontrolador ESP32-C3 Super Mini (6)**, alineando el conector USB
+- El **driver TMC2130 (7)**, alineando las 3 ranuras inferiores
+- Los **cables del sensor de efecto Hall (8)** (5V, GND, Señal)
+- Los **cables hacia los motores paso a paso (9)**, guiandose por los colores indicados sobre la placa.
 
 ![Paso 3](docs/images/montaje_paso3.jpg)
 
