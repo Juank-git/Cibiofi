@@ -1,6 +1,6 @@
 # Repositorio CIBioFi
 
-Este repositorio contiene los recursos necesarios para configurar y manejar las placas de control de motores paso a paso, donde cada placa controla un motor individual con precisión. Su desarrollo está orientado principalmente a la automatización de sistemas que requieren posicionamiento rápido y exacto, incluyendo aplicaciones en criptografía cuántica como la implementación del protocolo BB84 y otros experimentos de óptica cuántica.
+Este repositorio contiene los recursos necesarios para configurar y manejar las placas de control de motores paso a paso del CIBioFi, donde cada placa controla un motor individual con precisión. Su desarrollo está orientado principalmente a la automatización de sistemas que requieren posicionamiento rápido y exacto, incluyendo aplicaciones en criptografía cuántica como la implementación del protocolo BB84 y otros experimentos de óptica cuántica.
 
 ## Manual de Usuario
 
@@ -26,7 +26,7 @@ Con la fuente ya conectada, se verifica que el regulador entregue exactamente 5V
 
 #### Paso 3: Ubicación de componentes
 
-Una vez verificado el voltaje de salida del regulador se ubican los demás componentes respetando cuidadosamente su orientación:
+Una vez verificado el voltaje de salida del regulador, se desconecta la alimentación de entrada y se ubican los demás componentes respetando cuidadosamente su orientación:
 
 - La **resistencia de 10 kΩ (5)** (en caso de no estar soldada en la placa), su orientación no es relevante
 - El **microcontrolador ESP32-C3 Super Mini (6)**, alineando el conector USB
@@ -43,3 +43,50 @@ El montaje completo, sin los cables del motor y del sensor, debe verse de la sig
 ![Montaje con componentes ubicados](docs/images/montaje_con_componentes.jpg)
 
 *Imagen de referencia mostrando la PCB con los componentes correctamente ubicados.*
+
+---
+
+## Clonar el Repositorio en tu Equipo Local
+
+Para tener acceso a todos los archivos del proyecto en tu computadora local.
+
+### Prerrequisitos
+- Git instalado en tu sistema ([descargar aquí](https://git-scm.com/download/win))
+
+### Pasos para Clonar
+
+**1. Abre una terminal (PowerShell o CMD) y navega a la carpeta donde quieres guardar el proyecto:**
+
+```powershell
+cd C:\Users\TU_USUARIO\Desktop
+```
+
+**2. Clona el repositorio:**
+
+```powershell
+git clone https://github.com/Juank-git/Cibiofi.git
+```
+
+**3. Entra a la carpeta del proyecto:**
+
+```powershell
+cd Cibiofi
+```
+
+**4. Abre el proyecto en VS Code:**
+
+```powershell
+code .
+```
+
+O simplemente abre VS Code y usa `Archivo > Abrir Carpeta` para seleccionar la carpeta clonada.
+
+### Actualizar el Repositorio
+
+Para obtener los cambios más recientes del repositorio:
+
+```powershell
+git pull origin main
+```
+
+**Nota:** Cada carpeta del proyecto contiene instrucciones específicas sobre cómo cargar el código a los microcontroladores.
