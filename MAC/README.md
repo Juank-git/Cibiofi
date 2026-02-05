@@ -24,6 +24,23 @@ En el contexto del protocolo BB84, cada placa (Alice y Bob) puede ser identifica
 
 ## Cómo Cargar el Código a una Placa
 
+**⚠️ IMPORTANTE - Evitar Cortocircuito:**
+
+Antes de cargar código mediante USB, se debe **desconectar el ESP32-C3 de la PCB**. La PCB proporciona alimentación de 5V al pin VIN del microcontrolador. Si se conecta el cable USB mientras el ESP32-C3 está en la PCB, habrá dos fuentes de alimentación simultáneas (USB y PCB), lo que puede causar:
+
+- ⚡ Cortocircuito entre las fuentes de alimentación
+- 💥 Daño permanente al ESP32-C3 o a la PCB
+- 🔥 Sobrecalentamiento de componentes
+
+**Procedimiento seguro para programar:**
+1. Desconectar la alimentación externa de la PCB
+2. Remover cuidadosamente el ESP32-C3 de la PCB
+3. **Insertar el ESP32-C3 en una protoboard** para evitar que los pines hagan contacto entre sí o con superficies conductoras
+4. Conectar el ESP32-C3 a la computadora mediante cable USB
+5. Cargar el código (seguir pasos a continuación)
+6. Desconectar el cable USB
+7. Reinsertar el ESP32-C3 en la PCB
+
 ### Paso 1: Conectar la Placa
 
 1. Se conecta el ESP32-C3 Super Mini a la computadora mediante un cable USB tipo C
@@ -38,7 +55,7 @@ Si es la primera vez que se usa el dispositivo o si surgen problemas para cargar
 3. **Soltar** el botón BOOT después de 2 segundos
 4. La placa ahora debería estar en modo programación y lista para recibir código
 
-<img src="include/boot_esp32-c3.jpg" alt="Botón BOOT" width="500">
+<img src="images/boot_esp32-c3.jpg" alt="Botón BOOT" width="500">
 
 En descargas posteriores, este procedimiento generalmente no es necesario, ya que el ESP32-C3 entra automáticamente en modo programación.
 
@@ -69,8 +86,8 @@ Una vez cargado el código, el monitor serial mostrará algo similar a:
 
 ```
 === DIRECCIÓN MAC ===
-String: 34:B4:72:XX:XX:XX
-Array:  {0x34, 0xB4, 0x72, 0xXX, 0xXX, 0xXX}
+String: 0C:4E:A0:65:48:XX
+Array:  {0x0C, 0x4E, 0xA0, 0x65, 0x48, 0xXX}
 ```
 
 **Importante:** Se debe anotar esta dirección MAC y etiquetar físicamente la placa para futuras referencias.
