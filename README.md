@@ -1,6 +1,6 @@
 # Repositorio CIBioFi
 
-Este repositorio contiene los recursos para configurar y manejar placas de control de motores paso a paso, donde cada placa controla un motor individual con precisión. Su desarrollo está orientado principalmente a la automatización de sistemas que requieren posicionamiento rápidi y exacto, incluyendo aplicaciones en criptografía cuántica como la implementación del protocolo BB84 y otros experimentos de óptica cuántica.
+Este repositorio contiene los recursos necesarios para configurar y manejar las placas de control de motores paso a paso, donde cada placa controla un motor individual con precisión. Su desarrollo está orientado principalmente a la automatización de sistemas que requieren posicionamiento rápido y exacto, incluyendo aplicaciones en criptografía cuántica como la implementación del protocolo BB84 y otros experimentos de óptica cuántica.
 
 ## Manual de Usuario
 
@@ -22,7 +22,7 @@ Con la fuente ya conectada, se verifica que el regulador entregue exactamente 5V
 - Con un destornillador de pala, se gira el trimmer **(4)** del regulador hasta que el multímetro muestre 5.0V
 - **No se debe conectar ningún otro componente hasta completar este ajuste**
 
-[Paso 2](docs/images/montaje_paso2.jpg)
+![Paso 2](docs/images/montaje_paso2.jpg)
 
 #### Paso 3: Ubicación de componentes
 
@@ -34,7 +34,7 @@ Una vez verificado el voltaje de salida del regulador se ubican los demás compo
 - Los **(8) cables del sensor de efecto Hall** (5V, GND, Señal)
 - Los **(9) cables hacia los motores paso a paso**, guiandose por los colores indicados sobre la placa.
 
-[Paso 3](docs/images/montaje_paso3.jpg)
+![Paso 3](docs/images/montaje_paso3.jpg)
 
 #### Ejemplo de montaje completo
 

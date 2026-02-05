@@ -32,8 +32,9 @@
 
                 <div style="display: flex; gap: 10px; justify-content: center;">
                     <button type="button" onclick="enviarConfiguracion()">Iniciar</button>
-                    <button type="button" onclick="abortarProtocolo()" style="background: #ce4e5b;">Abortar</button>
-                    <button type="button" onclick="downloadCSV()" style="background: #3498db;">Descargar CSV</button>
+                    <button type="button" class="btn-homing" onclick="ejecutarHoming()">Homing</button>
+                    <button type="button" class="btn-abort" onclick="abortarProtocolo()">Abortar</button>
+                    <button type="button" class="btn-download" onclick="downloadCSV()">Descargar CSV</button>
                 </div>
                 <p id="status-message"></p>
             </form>
@@ -46,6 +47,7 @@
             <button class="nav-tab" onclick="openTab('clave-tab')">Generación de Clave</button>
             <button class="nav-tab" onclick="openTab('cascade-tab')">Corrección de Errores</button>
             <button class="nav-tab" onclick="openTab('amplification-tab')">Amplificación de Privacidad</button>
+            <button class="nav-tab" onclick="openTab('control-tab')">Control Manual</button>
         </div>
         
         <!-- Pestaña de Resumen Estadístico -->
@@ -625,6 +627,102 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nueva Pestaña de Control Manual -->
+        <div id="control-tab" class="tab-content">
+            <h2>Control Manual de Motores</h2>
+            <div class="manual-control-container">
+                <p class="info-text">Controla manualmente los motores de Alice y Bob. Puedes moverlos a ángulos específicos o a las posiciones predefinidas de bases y bits.</p>
+                
+                <div class="control-sections">
+                    <!-- Control de Alice -->
+                    <div class="motor-control-section">
+                        <h3>Control de Alice (Emisor)</h3>
+                        
+                        <div class="control-group">
+                            <h4>Movimiento por Ángulo</h4>
+                            <div class="angle-control">
+                                <label for="alice-angle">Ángulo (0-360°):</label>
+                                <input type="number" id="alice-angle" min="0" max="360" step="0.1" value="0">
+                                <button class="btn-move" onclick="moverAliceAngulo()">Mover Alice</button>
+                            </div>
+                        </div>
+                        
+                        <div class="control-group">
+                            <h4>Posiciones Predefinidas (Base + Bit)</h4>
+                            <div class="preset-grid">
+                                <div class="preset-item">
+                                    <span class="preset-label">H (Base +, Bit 0)</span>
+                                    <span class="preset-angle">47.7°</span>
+                                    <button class="btn-preset" onclick="moverAlicePreset(0, 0)">Mover</button>
+                                </div>
+                                <div class="preset-item">
+                                    <span class="preset-label">V (Base +, Bit 1)</span>
+                                    <span class="preset-angle">2.7°</span>
+                                    <button class="btn-preset" onclick="moverAlicePreset(0, 1)">Mover</button>
+                                </div>
+                                <div class="preset-item">
+                                    <span class="preset-label">D (Base x, Bit 0)</span>
+                                    <span class="preset-angle">25.2°</span>
+                                    <button class="btn-preset" onclick="moverAlicePreset(1, 0)">Mover</button>
+                                </div>
+                                <div class="preset-item">
+                                    <span class="preset-label">A (Base x, Bit 1)</span>
+                                    <span class="preset-angle">70.2°</span>
+                                    <button class="btn-preset" onclick="moverAlicePreset(1, 1)">Mover</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="motor-status">
+                            <p><strong>Estado:</strong> <span id="alice-status">Esperando comando</span></p>
+                            <p><strong>Posición actual:</strong> <span id="alice-position">-</span>°</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Control de Bob -->
+                    <div class="motor-control-section">
+                        <h3>Control de Bob (Receptor)</h3>
+                        
+                        <div class="control-group">
+                            <h4>Movimiento por Ángulo</h4>
+                            <div class="angle-control">
+                                <label for="bob-angle">Ángulo (0-360°):</label>
+                                <input type="number" id="bob-angle" min="0" max="360" step="0.1" value="0">
+                                <button class="btn-move" onclick="moverBobAngulo()">Mover Bob</button>
+                            </div>
+                        </div>
+                        
+                        <div class="control-group">
+                            <h4>Posiciones Predefinidas (Base)</h4>
+                            <div class="preset-grid">
+                                <div class="preset-item">
+                                    <span class="preset-label">Base + (Rectilinea)</span>
+                                    <span class="preset-angle">13.95°</span>
+                                    <button class="btn-preset" onclick="moverBobPreset(0)">Mover</button>
+                                </div>
+                                <div class="preset-item">
+                                    <span class="preset-label">Base x (Diagonal)</span>
+                                    <span class="preset-angle">36.45°</span>
+                                    <button class="btn-preset" onclick="moverBobPreset(1)">Mover</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="motor-status">
+                            <p><strong>Estado:</strong> <span id="bob-status">Esperando comando</span></p>
+                            <p><strong>Posición actual:</strong> <span id="bob-position">-</span>°</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="warning-box">
+                    <h4>⚠️ Advertencia</h4>
+                    <p>Asegúrate de que ambos motores hayan completado el homing antes de usar el control manual.</p>
+                    <p>Los movimientos manuales no afectan el protocolo BB84 en ejecución.</p>
                 </div>
             </div>
         </div>

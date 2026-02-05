@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control y Gráfica</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .container {
+      max-width: 800px;
+      width: 100%;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    input, button {
+      margin: 10px;
+      padding: 10px;
+      font-size: 16px;
+      width: calc(100% - 20px);
+      max-width: 300px;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    .pause-btn {
+      background-color: #f39c12;
+    }
+    .pause-btn:hover {
+      background-color: #e67e22;
+    }
+    .reset-btn {
+      background-color: #e74c3c;
+    }
+    .reset-btn:hover {
+      background-color: #c0392b;
+    }
+    .homing-btn {
+      background-color: #9b59b6;
+    }
+    .homing-btn:hover {
+      background-color: #8e44ad;
+    }
+    .save-btn {
+      background-color: #3498db;
+    }
+    .save-btn:hover {
+      background-color: #2980b9;
+    }
+    #chart-container, #avg-chart-container {
+      width: 100%;
+      max-width: 800px;
+      height: 400px;
+      position: relative;
+      margin: 20px auto;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+    }
+    
+    details#seriesSelectorContainer {
+      margin: 10px auto;
+      font-size: 14px;
+      max-width: 300px;
+      border: 1px solid #ccc;
+      background-color: #fff;
+      border-radius: 5px;
+      padding: 10px;
+      text-align: left;
+    }
+
+    details#seriesSelectorContainer summary {
+      font-weight: bold;
+      cursor: pointer;
+      outline: none;
+      list-style: none;
+      margin: -10px -10px 10px -10px;
+      padding: 10px;
+      text-align: center;
+    }
+
+    #seriesSelector {
+      margin-top: 8px;
+    }
+
+    #seriesSelector div {
+      margin-bottom: 8px;
+    }
+
+    #seriesSelector label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 0;  /* Reducir padding vertical */
+    }
+
+    #seriesSelector input[type="checkbox"] {
+      width: 14px;     /* Ancho del checkbox */
+      height: 14px;    /* Alto del checkbox */
+      margin: 5px;       /* Eliminar márgenes por defecto */
+      flex-shrink: 0;  /* Evitar que el checkbox se encoja */
+    }
+
+    #selectAll {
+      width: 14px;    /* Ancho del checkbox "Seleccionar todo" */
+      height: 14px;   /* Alto del checkbox "Seleccionar todo" */
+      margin: 0;      /* Eliminar márgenes por defecto */
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Control del Motor y Gráfica</h1>
+    <input type="number" id="angleMax" placeholder="Ángulo máximo (grados)" step="1" min="0">
+    <input type="number" id="angleStep" placeholder="Paso angular (grados)" step="1" min="1">
+    <input type="number" id="numSamples" placeholder="Número de muestras" step="1" min="1">
+    <input type="number" id="numExecutions" placeholder="Cantidad de ejecuciones" step="1" min="1">
+    <button onclick="startProcess()">Iniciar</button>
+    <button onclick="pauseProcess()" class="pause-btn">Pausar</button>
+    <button onclick="resetMotor()" class="reset-btn">Regresar a 0°</button>
+    <button onclick="executeHoming()" class="homing-btn">🏠 Homing</button>
+    <button onclick="copyCSV()" class="copy-btn">Copiar CSV</button>
+    <button onclick="saveSeriesToFiles()" class="save-btn">Guardar Series</button>
+  </div>
+  <!-- Gráfico de series individuales -->
+  <div id="chart-container">
+    <canvas id="chart"></canvas>
+  </div>
+  <!-- Gráfico del promedio normalizado -->
+  <div id="avg-chart-container">
+    <canvas id="avgChart"></canvas>
+  </div>
+  <!-- Mover el selector de series aquí, después de las gráficas -->
+  <details id="seriesSelectorContainer">
+    <summary>Seleccionar series para promedio</summary>
+    <div id="seriesSelector"></div>
+  </details>
+
+  <script>
+    const ws = new WebSocket(`ws://${window.location.hostname}:81`);
+    const ctx = document.getElementById("chart").getContext("2d");
+
+    // Gráfico de series individuales
+    const data = {
+      labels: [],
+      datasets: [{
+        label: "Potencia promedio (µW)",
+        data: [],
+        borderColor: "rgba(75, 192, 192, 1)",
+        backgroundColor: "rgba(75, 192, 192, 0.2)",
+        borderWidth: 2,
+        fill: true
+      }]
+    };
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: "Ángulo (grados)" } },
+        y: { title: { display: true, text: "Potencia (µW)" }, beginAtZero: true }
+      }
+    };
+
+    const chart = new Chart(ctx, { type: "line", data: data, options: options });
+
+    // Gráfico para el promedio normalizado
+    const ctxAvg = document.getElementById("avgChart").getContext("2d");
+    const avgData = {
+      labels: [],
+      datasets: [{
+        label: "Promedio Normalizado",
+        data: [],
+        borderColor: "rgba(255, 99, 132, 1)",
+        backgroundColor: "rgba(255, 99, 132, 0.2)",
+        borderWidth: 2,
+        fill: true
+      }]
+    };
+
+    const avgChart = new Chart(ctxAvg, {
+      type: "line",
+      data: avgData,
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { title: { display: true, text: "Ángulo (grados)" } },
+          y: { title: { display: true, text: "Potencia Normalizada" }, min: 0, max: 1 }
+        }
+      }
+    });
+
+    let isProcessing = false;
+    let isPaused = false;
+    let numExecutions = 1; 
+    let currentExecution = 0; 
+    let allDatasets = [];
+
+    ws.onopen = () => { console.log("✅ Conectado al WebSocket."); };
+    ws.onclose = () => { console.log("❌ Desconectado del WebSocket."); };
+
+    // Función para normalizar un array de valores (lleva sus valores a un rango [0,1])
+    function normalizeArray(arr) {
+      const max = Math.max(...arr);
+      const min = Math.min(...arr);
+      return arr.map(val => (val - min) / (max - min));
+    }
+
+    // Función para calcular el promedio elemento a elemento de varios arrays
+    function averageArrays(arrays) {
+      if (arrays.length === 0) return [];
+      const length = arrays[0].length;
+      const result = new Array(length).fill(0);
+      for (let i = 0; i < length; i++) {
+        for (const arr of arrays) {
+          result[i] += arr[i];
+        }
+        result[i] /= arrays.length;
+      }
+      return result;
+    }
+
+    // Actualiza la lista de series con cada checkbox en su propia fila y con un checkbox "Seleccionar todo"
+    function updateSeriesSelector() {
+      const container = document.getElementById("seriesSelector");
+      container.innerHTML = "";
+      
+      // Checkbox "Seleccionar todo"
+      const selectAllDiv = document.createElement("div");
+      const selectAllLabel = document.createElement("label");
+      const selectAllCheckbox = document.createElement("input");
+      selectAllCheckbox.type = "checkbox";
+      selectAllCheckbox.id = "selectAll";
+      selectAllCheckbox.checked = true;
+      selectAllCheckbox.addEventListener("change", function(){
+        const childCheckboxes = container.querySelectorAll("input[type='checkbox']:not(#selectAll)");
+        childCheckboxes.forEach(chk => { chk.checked = selectAllCheckbox.checked; });
+        updateAverageChart();
+      });
+      selectAllLabel.appendChild(selectAllCheckbox);
+      selectAllLabel.appendChild(document.createTextNode(" Seleccionar todo"));
+      selectAllDiv.appendChild(selectAllLabel);
+      container.appendChild(selectAllDiv);
+      
+      // Crear una fila para cada serie
+      data.datasets.forEach((ds, i) => {
+        const row = document.createElement("div");
+        const label = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.id = "series_" + i;
+        cb.checked = true;
+        cb.addEventListener("change", function(){
+          const childCheckboxes = container.querySelectorAll("input[type='checkbox']:not(#selectAll)");
+          const allChecked = Array.from(childCheckboxes).every(chk => chk.checked);
+          document.getElementById("selectAll").checked = allChecked;
+          updateAverageChart();
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(" " + ds.label));
+        row.appendChild(label);
+        container.appendChild(row);
+      });
+    }
+    
+    // Actualizar el gráfico de promedio normalizado considerando solo las series seleccionadas
+    function updateAverageChart() {
+      console.log("Actualizando gráfico de promedio...");
+      
+      // Verificar si hay datos para promediar
+      if (data.datasets.length === 0 || data.labels.length === 0) {
+        console.log("No hay datos para promediar");
+        return;
+      }
+      
+      // Obtener las series seleccionadas con datos válidos
+      let selectedSeries = [];
+      for (let i = 0; i < data.datasets.length; i++) {
+        const cb = document.getElementById("series_" + i);
+        if (!cb || cb.checked) {
+          const dataset = data.datasets[i];
+          if (dataset && dataset.data && dataset.data.some(val => val !== null && val !== undefined)) {
+            selectedSeries.push(dataset);
+          }
+        }
+      }
+      
+      console.log(`Series seleccionadas para promedio: ${selectedSeries.length}`);
+      if (selectedSeries.length === 0) return;
+      
+      // Crear un objeto para almacenar los valores por ángulo
+      const valuesByAngle = {};
+      
+      // Para cada ángulo, recolectar los valores válidos de todas las series seleccionadas
+      data.labels.forEach((angleLabel, labelIndex) => {
+        const angle = angleLabel.replace('°', '');
+        valuesByAngle[angle] = [];
+        
+        selectedSeries.forEach(series => {
+          if (series.data[labelIndex] !== null && series.data[labelIndex] !== undefined) {
+            valuesByAngle[angle].push(series.data[labelIndex]);
+          }
+        });
+      });
+      
+      // Calcular promedios solo para ángulos con datos
+      const averages = [];
+      const angles = [];
+      
+      for (const angle in valuesByAngle) {
+        const values = valuesByAngle[angle];
+        if (values.length > 0) {
+          const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
+          angles.push(angle + '°');
+          averages.push(avg);
+        }
+      }
+      
+      // Ordenar ángulos numéricamente
+      const sortedIndices = angles.map((_, i) => i).sort((a, b) => {
+        return parseFloat(angles[a]) - parseFloat(angles[b]);
+      });
+      
+      const sortedAngles = sortedIndices.map(i => angles[i]);
+      const sortedAverages = sortedIndices.map(i => averages[i]);
+      
+      // Normalizar y actualizar la gráfica
+      if (sortedAverages.length > 0) {
+        const normalizedAverages = normalizeArray(sortedAverages);
+        avgData.labels = sortedAngles;
+        avgData.datasets[0].data = normalizedAverages;
+        avgChart.update();
+        console.log(`Gráfico de promedio actualizado con ${sortedAngles.length} puntos`);
+      }
+    }
+
+    ws.onmessage = (event) => {
+      const message = event.data;
+      console.log("📩 Mensaje recibido:", message);
+
+      if (message.startsWith("DATA:")) {
+        // Procesar datos aunque isProcessing sea false para permitir ver actualizaciones desde otros clientes
+        const [angle, power] = message.substring(5).split(",");
+        const angleValue = parseFloat(angle).toFixed(2);
+        const powerValue = parseFloat(power).toFixed(2);
+
+        let labelIndex = data.labels.indexOf(`${angleValue}°`);
+        if (labelIndex === -1) {
+          data.labels.push(`${angleValue}°`);
+          // Ordenar las etiquetas numéricamente para garantizar la visualización correcta
+          data.labels = data.labels.sort((a, b) => parseFloat(a) - parseFloat(b));
+          // Recalcular índice después de ordenar
+          labelIndex = data.labels.indexOf(`${angleValue}°`);
+        }
+
+        // Asegurarse de que el dataset existe para la serie actual
+        if (!data.datasets[currentExecution]) {
+          const colorIndex = currentExecution % 5;
+          const colors = ['rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)', 'rgba(54, 162, 235, 1)',
+                          'rgba(255, 206, 86, 1)', 'rgba(153, 102, 255, 1)'];
+          data.datasets[currentExecution] = {
+            label: `Serie ${currentExecution + 1}`,
+            data: new Array(data.labels.length).fill(null),
+            borderColor: colors[colorIndex],
+            backgroundColor: colors[colorIndex].replace('1)', '0.2)'),
+            borderWidth: 2,
+            fill: true
+          };
+          updateSeriesSelector(); // Actualizar selector cuando se crea una nueva serie
+        }
+
+        // Asegurarse de que todos los datasets tengan suficientes elementos
+        data.datasets.forEach(dataset => {
+          while (dataset.data.length < data.labels.length) {
+            dataset.data.push(null);
+          }
+        });
+
+        // Actualizar el valor del punto específico
+        data.datasets[currentExecution].data[labelIndex] = parseFloat(powerValue);
+        chart.update();
+        
+        // Actualizar el promedio normalizado inmediatamente con cada nuevo punto
+        updateAverageChart();
+        
+        console.log(`📊 Serie ${currentExecution + 1}, Ángulo: ${angleValue}°, Potencia: ${powerValue} µW`);
+      }
+      
+      else if (message.startsWith("STATUS:NEW_RUN")) {
+        // Actualizar el gráfico de promedio antes de iniciar la nueva serie
+        updateAverageChart();
+        currentExecution++;
+        console.log(`▶ Iniciando serie ${currentExecution + 1}`);
+      }
+      else if (message.startsWith("STATUS:COMPLETE")) {
+        updateAverageChart();
+        alert("✅ Proceso completado.");
+        isProcessing = false;
+      }
+      else if (message.startsWith("STATUS:PAUSED")) {
+        console.log("⏸ Proceso pausado.");
+      }
+      else if (message.startsWith("STATUS:RESUMED")) {
+        console.log("▶ Proceso reanudado.");
+      }
+      else if (message.startsWith("STATUS:RESET")) {
+        console.log("🔄 Motor regresado a 0°.");
+        data.labels = [];
+        data.datasets[0].data = [];
+        chart.update();
+      }
+      else if (message.startsWith("STATUS:HOMING_COMPLETE")) {
+        alert("🏠 Homing completado. Motor calibrado en posición 0°.");
+        console.log("🏠 Homing completado.");
+      }
+      else if (message.startsWith("ERROR:INVALID_STEPS")) {
+        alert("⚠ Error: Los pasos no suman exactamente el ángulo máximo.");
+        isProcessing = false;
+      }
+      else if (message.startsWith("SAVE_COMPLETE:")) {
+        const filesData = JSON.parse(message.substring(13));
+        filesData.forEach(file => {
+          // Crear enlace de descarga para cada archivo
+          const link = document.createElement('a');
+          link.href = file.url;
+          link.download = file.name;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        });
+        alert("✅ Archivos guardados y listos para descargar!");
+      }
+    };
+
+    function startProcess() {
+      const angleMax = parseFloat(document.getElementById("angleMax").value);
+      const angleStep = parseFloat(document.getElementById("angleStep").value);
+      const numSamples = document.getElementById("numSamples").value;
+      numExecutions = parseInt(document.getElementById("numExecutions").value) || 1;
+      currentExecution = 0;
+
+      if (!angleMax || !angleStep || !numSamples) {
+        alert("⚠ Completa todos los campos.");
+        return;
+      }
+
+      // Verificar que el ángulo máximo sea divisible por el paso angular
+      const steps = angleMax / angleStep;
+      const isInteger = Math.abs(Math.round(steps) - steps) < 0.000001;
+      if (!isInteger) {
+        alert(`⚠ Error: El ángulo máximo debe ser divisible exactamente por el paso angular.\n${angleMax} ÷ ${angleStep} = ${steps}`);
+        return;
+      }
+
+      // Preparar los datasets para cada ejecución con colores diferentes
+      allDatasets = [];
+      const colors = ['rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)', 'rgba(54, 162, 235, 1)',
+                       'rgba(255, 206, 86, 1)', 'rgba(153, 102, 255, 1)'];
+      for (let i = 0; i < numExecutions; i++) {
+        allDatasets.push({
+          label: `Serie ${i + 1}`,
+          data: [],
+          borderColor: colors[i % colors.length],
+          backgroundColor: colors[i % colors.length].replace('1)', '0.2)'),
+          borderWidth: 2,
+          fill: true
+        });
+      }
+      data.labels = [];
+      data.datasets = allDatasets;
+      chart.update();
+
+      // Reiniciar el gráfico del promedio normalizado
+      avgData.labels = [];
+      avgData.datasets[0].data = [];
+      avgChart.update();
+
+      // Actualizar el selector de series
+      updateSeriesSelector();
+
+      ws.send(`CONFIG:${angleMax},${angleStep},${numSamples},${numExecutions}`);
+      console.log(`⚙ Enviando configuración: Ángulo Máximo=${angleMax}, Paso=${angleStep}, Muestras=${numSamples}, Ejecuciones=${numExecutions}`);
+      isProcessing = true;
+    }
+
+    function pauseProcess() {
+      isPaused = !isPaused;
+      ws.send(isPaused ? "PAUSE" : "RESUME");
+      console.log(isPaused ? "⏸ Proceso pausado." : "▶ Proceso reanudado.");
+    }
+
+    function resetMotor() {
+      ws.send("RESET");
+      console.log("🔄 Solicitando reinicio del motor a 0°.");
+    }
+    
+    function executeHoming() {
+      if (confirm("¿Ejecutar rutina de homing? El motor se recalibrará a la posición 0°.")) {
+        ws.send("HOMING");
+        console.log("🏠 Solicitando homing del motor.");
+      }
+    }
+    
+    function copyCSV() {
+      let csv = "Ángulo,Valor Normalizado\n";
+      const labels = avgData.labels;
+      const values = avgData.datasets[0].data;
+      for (let i = 0; i < labels.length; i++) {
+        const angle = labels[i].replace("°", "");
+        csv += angle + "," + values[i] + "\n";
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(csv).then(() => {
+          alert("CSV copiado al portapapeles.");
+        }, () => {
+          alert("Error al copiar CSV.");
+        });
+      } else {
+        // Fallback: copiar usando un textarea
+        const textarea = document.createElement("textarea");
+        textarea.value = csv;
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try {
+          document.execCommand("copy");
+          alert("CSV copiado al portapapeles.");
+        } catch (err) {
+          alert("Error al copiar CSV.");
+        }
+        document.body.removeChild(textarea);
+      }
+    }
+
+    function saveSeriesToFiles() {
+      try {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        
+        // Guardar cada serie en un archivo
+        data.datasets.forEach((ds, i) => {
+          // Crear contenido del archivo
+          let fileContent = "Angulo,Potencia\n";
+          for (let j = 0; j < data.labels.length; j++) {
+            const angle = data.labels[j].replace('°', '');
+            const power = ds.data[j];
+            fileContent += `${angle},${power}\n`; // Corregido: faltaba cerrar la comilla
+          }
+
+          // Crear y descargar archivo
+          const blob = new Blob([fileContent], { type: 'text/csv' });
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `Serie_${i + 1}_${timestamp}.csv`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        });
+
+        // Guardar el promedio normalizado
+        let avgContent = "Angulo,Valor_Normalizado\n";
+        for (let i = 0; i < avgData.labels.length; i++) {
+          const angle = avgData.labels[i].replace('°', '');
+          avgContent += `${angle},${avgData.datasets[0].data[i]}\n`; // Corregido: faltaba cerrar la comilla y había un punto y coma extra
+        }
+        
+        const avgBlob = new Blob([avgContent], { type: 'text/csv' });
+        const avgUrl = window.URL.createObjectURL(avgBlob);
+        const avgLink = document.createElement('a');
+        avgLink.href = avgUrl;
+        avgLink.download = `Promedio_Normalizado_${timestamp}.csv`;
+        document.body.appendChild(avgLink);
+        avgLink.click();
+        document.body.removeChild(avgLink);
+        window.URL.revokeObjectURL(avgUrl);
+
+        alert("✅ Archivos guardados exitosamente!");
+      } catch (err) {
+        console.error('Error al guardar archivos:', err);
+        alert("⚠ Error al guardar los archivos: " + err.message);
+      }
+    }
+  </script>
+</body>
+</html>

@@ -520,6 +520,101 @@ function abortarProtocolo() {
     document.getElementById("status-message").textContent = "Abortando protocolo...";
 }
 
+function ejecutarHoming() {
+    socket.send("HOMING_ALL");
+    document.getElementById("status-message").textContent = "Ejecutando homing en Alice y Bob...";
+}
+
+// ============================================
+// FUNCIONES DE CONTROL MANUAL
+// ============================================
+
+function moverAliceAngulo() {
+    const angle = parseFloat(document.getElementById('alice-angle').value);
+    if (isNaN(angle) || angle < 0 || angle > 360) {
+        alert("Por favor, introduce un ángulo válido entre 0 y 360 grados");
+        return;
+    }
+    
+    const command = JSON.stringify({
+        type: "MOVE_ALICE",
+        angle: angle
+    });
+    
+    socket.send(command);
+    document.getElementById('alice-status').textContent = `Moviendo a ${angle}°...`;
+}
+
+function moverAlicePreset(base, bit) {
+    const angles = [
+        [47.7, 2.7],   // Base 0: [H, V]
+        [25.2, 70.2]   // Base 1: [D, A]
+    ];
+    
+    const angle = angles[base][bit];
+    const labels = [
+        ["H (Horizontal)", "V (Vertical)"],
+        ["D (Diagonal)", "A (Antidiagonal)"]
+    ];
+    
+    const command = JSON.stringify({
+        type: "MOVE_ALICE",
+        angle: angle
+    });
+    
+    socket.send(command);
+    document.getElementById('alice-status').textContent = `Moviendo a ${labels[base][bit]} - ${angle}°...`;
+}
+
+function moverBobAngulo() {
+    const angle = parseFloat(document.getElementById('bob-angle').value);
+    if (isNaN(angle) || angle < 0 || angle > 360) {
+        alert("Por favor, introduce un ángulo válido entre 0 y 360 grados");
+        return;
+    }
+    
+    const command = JSON.stringify({
+        type: "MOVE_BOB",
+        angle: angle
+    });
+    
+    socket.send(command);
+    document.getElementById('bob-status').textContent = `Moviendo a ${angle}°...`;
+}
+
+function moverBobPreset(base) {
+    const angles = [13.95, 36.45];  // [Base +, Base x]
+    const labels = ["Base + (Rectilinea)", "Base x (Diagonal)"];
+    
+    const angle = angles[base];
+    
+    const command = JSON.stringify({
+        type: "MOVE_BOB",
+        angle: angle
+    });
+    
+    socket.send(command);
+    document.getElementById('bob-status').textContent = `Moviendo a ${labels[base]} - ${angle}°...`;
+}
+
+// Actualizar rangos del input de duración según la unidad seleccionada
+function updateDurationRanges() {
+    const unit = document.getElementById('duracion_unit').value;
+    const input = document.getElementById('duracion_us');
+    const rangeText = document.getElementById('duracion_range');
+    
+    if (unit === 'us') {
+        input.max = 16777215;
+        rangeText.textContent = 'Rango: 0 - 16777215 μs';
+    } else if (unit === 'ms') {
+        input.max = 16777;
+        rangeText.textContent = 'Rango: 0 - 16777 ms (16777215 μs)';
+    } else if (unit === 's') {
+        input.max = 16;
+        rangeText.textContent = 'Rango: 0 - 16 s (16777215 μs)';
+    }
+}
+
 // Función para descargar los datos como CSV
 function downloadCSV() {
     let csv = "Pulso,BaseAlice,BaseBob,BitEnviado,BitRecibido,Detector0,Detector1\n";

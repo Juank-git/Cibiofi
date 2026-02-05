@@ -65,6 +65,30 @@ button:hover {
     background: #00364a;
 }
 
+button.btn-homing {
+    background: #f39c12;
+}
+
+button.btn-homing:hover {
+    background: #e67e22;
+}
+
+button.btn-abort {
+    background: #ce4e5b;
+}
+
+button.btn-abort:hover {
+    background: #a93f4a;
+}
+
+button.btn-download {
+    background: #3498db;
+}
+
+button.btn-download:hover {
+    background: #2980b9;
+}
+
 #status-message {
     color: #4caf50;
     font-weight: bold;
@@ -1696,4 +1720,179 @@ tr.bits-error:hover td {
 
 .action-btn.skip-btn:hover {
     background-color: #e68900;
+}
+
+/* Estilos para la pestaña de Control Manual */
+.manual-control-container {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.control-sections {
+    display: flex;
+    gap: 30px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+}
+
+.motor-control-section {
+    flex: 1;
+    min-width: 400px;
+    background: #1a1a1a;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
+}
+
+.motor-control-section h3 {
+    color: #4facfe;
+    border-bottom: 2px solid #054b79;
+    padding-bottom: 10px;
+    margin-top: 0;
+}
+
+.control-group {
+    margin: 20px 0;
+    padding: 15px;
+    background: #222;
+    border-radius: 8px;
+}
+
+.control-group h4 {
+    margin-top: 0;
+    color: #e0e0e0;
+    font-size: 1.1rem;
+}
+
+.angle-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.angle-control label {
+    min-width: 120px;
+}
+
+.angle-control input {
+    flex: 1;
+    min-width: 100px;
+    max-width: 150px;
+}
+
+.btn-move {
+    background: #28a745;
+    padding: 8px 20px;
+}
+
+.btn-move:hover {
+    background: #218838;
+}
+
+.preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.preset-item {
+    background: #2a2a2a;
+    padding: 15px;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 2px solid #333;
+    transition: border-color 0.3s;
+}
+
+.preset-item:hover {
+    border-color: #054b79;
+}
+
+.preset-label {
+    font-weight: bold;
+    color: #e0e0e0;
+    font-size: 0.95rem;
+}
+
+.preset-angle {
+    color: #4facfe;
+    font-size: 1.1rem;
+    font-weight: bold;
+}
+
+.btn-preset {
+    background: #054b79;
+    padding: 8px 15px;
+    margin-top: 5px;
+}
+
+.btn-preset:hover {
+    background: #00364a;
+}
+
+.motor-status {
+    margin-top: 20px;
+    padding: 15px;
+    background: #222;
+    border-radius: 8px;
+    border-left: 4px solid #f39c12;
+}
+
+.motor-status p {
+    margin: 8px 0;
+}
+
+.motor-status span {
+    color: #4facfe;
+    font-weight: bold;
+}
+
+.warning-box {
+    margin-top: 30px;
+    padding: 20px;
+    background: rgba(206, 78, 91, 0.2);
+    border: 2px solid #ce4e5b;
+    border-radius: 8px;
+}
+
+.warning-box h4 {
+    margin-top: 0;
+    color: #ff6b6b;
+}
+
+.warning-box p {
+    margin: 8px 0;
+    line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+    .control-sections {
+        flex-direction: column;
+    }
+    
+    .motor-control-section {
+        min-width: 100%;
+    }
+    
+    .preset-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .angle-control {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .angle-control label {
+        min-width: auto;
+    }
+    
+    .angle-control input {
+        max-width: 100%;
+    }
 }

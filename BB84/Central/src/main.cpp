@@ -10,24 +10,12 @@
 // ==============================================
 // Configuración de RED
 // ==============================================
-
-
-/*
 const char* ssid = "Loic";
 const char* password = "Loic1234";
 
 // IP estática
 IPAddress local_IP(192, 168, 137, 100);
 IPAddress gateway(192, 168, 137, 1);
-IPAddress subnet(255, 255, 255, 0);
-*/
-
-const char* ssid = "Anjoca_2.4G";
-const char* password = "6025598137";
-
-// IP estática
-IPAddress local_IP(192, 168, 1, 100);
-IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 
 WebServer server(80);
@@ -42,15 +30,33 @@ WebSocketsServer webSocket = WebSocketsServer(81);
 // ==============================================
 // ESP-NOW - Comunicación con Alice y Bob
 // ==============================================
+
+// CONFIGURACIÓN: Canal WiFi/ESP-NOW (debe ser igual en Central, Alice y Bob)
+const int ESP_NOW_CHANNEL = 11;
+
 uint8_t aliceMAC[] = {0x0C,0x4E,0xA0,0x64,0xC0,0xB8};  // MAC de la Super Mini 1 (Alice)
-uint8_t bobMAC[] = {0x0C,0x4E,0xA0,0x65,0x48,0x3C};     // MAC de la Super Mini 2 (Bob)
+uint8_t bobMAC[] = {0x0C,0x4E,0xA0,0x64,0xC1,0x9C};     // MAC de la Super Mini 2 (Bob)
+
+//Bob: 0C:4E:A0:64:C1:9C
+/*
+uint8_t bobMAC[] = {0x0C,0x4E,0xA0,0x64,0xC0,0xB8};  // MAC de la Super Mini 1 (Alice)
+uint8_t aliceMAC[] = {0x0C,0x4E,0xA0,0x65,0x48,0x3C};     // MAC de la Super Mini 2 (Bob)
+*/
+
 
 // Estructuras de comunicación ESP-NOW
 struct CommandData {
   uint8_t cmd;          // Tipo de comando
   uint32_t pulseNum;    // Número de pulso actual
   uint32_t totalPulses; // Total de pulsos a transmitir
-};
+} __attribute__((packed));
+
+// Nueva estructura para comandos de movimiento manual
+struct ManualMoveCommand {
+  uint8_t cmd;          // CMD_MOVE_MANUAL
+  float targetAngle;    // Ángulo objetivo
+  uint32_t reserved;    // Reservado para mantener tamaño
+} __attribute__((packed));
 
 struct ResponseData {
   uint8_t status;       // Estado: READY, ERROR, HOME_COMPLETE
@@ -58,7 +64,7 @@ struct ResponseData {
   int base;             // Base usada (Alice: 0-1, Bob: 0-1)
   int bit;              // Bit enviado (solo Alice: 0-1)
   float angle;          // Ángulo alcanzado
-};
+} __attribute__((packed));
 
 // Comandos
 #define CMD_PING 0x00          // Comando de ping para verificar conexión
@@ -66,12 +72,13 @@ struct ResponseData {
 #define CMD_PREPARE_PULSE 0x02
 #define CMD_ABORT 0x03
 #define CMD_START_PROTOCOL 0x04
+#define CMD_MOVE_MANUAL 0x05   // Nuevo comando para movimiento manual
 
-// Estados
-#define STATUS_PONG 0x00              // Respuesta al ping
-#define STATUS_HOME_COMPLETE 0x10
-#define STATUS_READY 0x20
-#define STATUS_ERROR 0x30
+// Estados (DEBEN coincidir con Alice/Bob)
+#define STATUS_PONG 0              // Respuesta al ping
+#define STATUS_HOME_COMPLETE 1
+#define STATUS_READY 2
+#define STATUS_ERROR 3
 
 // Flags de estado de los motores
 bool aliceReady = false;
@@ -106,7 +113,7 @@ uint32_t totalPulses = 0;
 HardwareSerial UARTFPGA(2);
 #define RX_PIN 16
 #define TX_PIN 17
-#define RESET_PIN 25
+#define RESET_PIN 5
 #define NEXT_PULSE_PIN 4
 
 // Señal de control de FPGA
@@ -140,6 +147,38 @@ void sendCommandToAlice(uint8_t cmd, uint32_t pulseNum = 0);
 void sendCommandToBob(uint8_t cmd, uint32_t pulseNum = 0);
 void prepareNextPulse();
 
+// Helper para servir archivos SPIFFS de forma optimizada
+void serveFile(const char* path, const char* contentType, bool enableCache = true) {
+  File file = SPIFFS.open(path, "r");
+  if (!file) {
+    server.send(404, "text/plain", "Archivo no encontrado");
+    return;
+  }
+  
+  // Obtener tamaño del archivo
+  size_t fileSize = file.size();
+  
+  // Configurar cabeceras ANTES de enviar
+  if (enableCache) {
+    server.sendHeader("Cache-Control", "max-age=86400");
+  }
+  server.sendHeader("Connection", "close");
+  
+  // Usar setContentLength para garantizar tamaño correcto
+  server.setContentLength(fileSize);
+  server.send(200, contentType, "");
+  
+  // Enviar archivo en bloques de 1KB
+  uint8_t buffer[1024];
+  while (file.available()) {
+    size_t bytesRead = file.read(buffer, sizeof(buffer));
+    server.client().write(buffer, bytesRead);
+    yield(); // Permitir que el watchdog se ejecute
+  }
+  
+  file.close();
+}
+
 void setup() {
   // Inicialización de comunicaciones
   Serial.begin(115200);
@@ -162,14 +201,16 @@ void setup() {
   Serial.printf("LEDs de conexión configurados:\n");
   Serial.printf("  - Alice: Pin %d (Rojo)\n", LED_ALICE_PIN);
   Serial.printf("  - Bob:   Pin %d (Azul)\n", LED_BOB_PIN);
-  
+
   // TEST: Parpadear LEDs para verificar hardware
   Serial.println("TEST LEDs: Parpadeando...");
   for(int i = 0; i < 3; i++) {
     digitalWrite(LED_ALICE_PIN, HIGH);
-    digitalWrite(LED_BOB_PIN, HIGH);
-    delay(200);
+    delay(300);
     digitalWrite(LED_ALICE_PIN, LOW);
+    delay(200);
+    digitalWrite(LED_BOB_PIN, HIGH);
+    delay(300);
     digitalWrite(LED_BOB_PIN, LOW);
     delay(200);
   }
@@ -178,6 +219,7 @@ void setup() {
   // ==============================================
   // Configuración Wi-Fi
   // ==============================================
+  WiFi.mode(WIFI_AP_STA);  // Establecer modo híbrido ANTES de conectar
   WiFi.config(local_IP, gateway, subnet);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -187,6 +229,21 @@ void setup() {
   Serial.println("Wi-Fi conectado.");
   Serial.print("IP: ");
   Serial.println(WiFi.localIP());
+  
+  // Obtener y mostrar información del canal WiFi
+  uint8_t wifiChannel;
+  wifi_second_chan_t secondChannel;
+  esp_wifi_get_channel(&wifiChannel, &secondChannel);
+  Serial.printf("Canal WiFi del router: %d\n", wifiChannel);
+  Serial.printf("Canal secundario: %d\n", secondChannel);
+  
+  // CRÍTICO: Verificar que el router esté en el canal correcto
+  if (wifiChannel != ESP_NOW_CHANNEL) {
+    Serial.printf("\n*** ADVERTENCIA ***\n");
+    Serial.printf("Router en canal %d pero ESP-NOW configurado para canal %d\n", wifiChannel, ESP_NOW_CHANNEL);
+    Serial.printf("Configurar router en canal %d o cambiar ESP_NOW_CHANNEL en el código\n", wifiChannel);
+    Serial.printf("****************\n\n");
+  }
 
   // Configuración de archivos SPIFFS
   if (!SPIFFS.begin(true)) {
@@ -197,125 +254,75 @@ void setup() {
   // ==============================================
   // Configuración del servidor web y web socket
   // ==============================================
+  // Usar función helper optimizada para servir archivos
   server.on("/", HTTP_GET, []() {
-    File file = SPIFFS.open("/index.html", "r");
-    if (!file) {
-      server.send(500, "text/plain", "Error al abrir index.html");
-      return;
-    }
-    String html = file.readString();
-    server.send(200, "text/html", html);
-    file.close();
+    serveFile("/index.html", "text/html", false); // No cache para HTML
   });
   
   server.on("/styles.css", HTTP_GET, []() {
-    File file = SPIFFS.open("/styles.css", "r");
-    if (!file) {
-      server.send(500, "text/plain", "Error al abrir styles.css");
-      return;
-    }
-    String css = file.readString();
-    server.send(200, "text/css", css);
-    file.close();
+    serveFile("/styles.css", "text/css");
   });
 
   server.on("/script.js", HTTP_GET, []() {
-    File file = SPIFFS.open("/script.js", "r");
-    if (!file) {
-      server.send(500, "text/plain", "Error al abrir script.js");
-      return;
-    }
-    String css = file.readString();
-    server.send(200, "application/javascript", css);
-    file.close();
+    serveFile("/script.js", "application/javascript");
   });
 
   server.on("/scriptPost.js", HTTP_GET, []() {
-    File file = SPIFFS.open("/scriptPost.js", "r");
-    if (!file) {
-      server.send(500, "application/javascript", "Error al abrir scriptPost.js");
-      return;
-    }
-    String css = file.readString();
-    server.send(200, "text/css", css);
-    file.close();
+    serveFile("/scriptPost.js", "application/javascript");
   });
 
   server.on("/scriptCascade.js", HTTP_GET, []() {
-    File file = SPIFFS.open("/scriptCascade.js", "r");
-    if (!file) {
-      server.send(500, "text/plain", "Error al abrir scriptCascade.js");
-      return;
-    }
-    String css = file.readString();
-    server.send(200, "application/javascript", css);
-    file.close();
+    serveFile("/scriptCascade.js", "application/javascript");
   });
 
-  // Servir favicon (opcional)
   server.on("/favicon.ico", HTTP_GET, []() {
-    File file = SPIFFS.open("/favicon.ico", "r");
-    if (!file) {
-      server.send(404, "text/plain", "favicon no encontrado");
-      return;
-    }
-    server.streamFile(file, "image/x-icon");
-    file.close();
+    serveFile("/favicon.ico", "image/x-icon");
   });
   
+  // Configuración del servidor para mejorar estabilidad
+  server.enableCORS(true);  // Habilitar CORS si es necesario
+  
   server.begin();
+  Serial.println("Servidor HTTP iniciado");
+  
   webSocket.begin();
   webSocket.onEvent(onWebSocketEvent);
+  Serial.println("WebSocket iniciado en puerto 81");
 
   // ==============================================
   // Configurar ESP-NOW para Alice y Bob
   // ==============================================
-  Serial.println("Configurando ESP-NOW...");
+  Serial.println("\n=== Configurando ESP-NOW ===");
   
-  // Modo híbrido: WiFi AP/STA + ESP-NOW
-  WiFi.mode(WIFI_AP_STA);
   esp_wifi_set_ps(WIFI_PS_NONE);
-  
-  // Fijar canal 13 para ESP-NOW
-  int channel = 13;
-  esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+  Serial.printf("Usando canal WiFi del router: %d\n", wifiChannel);
   
   if (esp_now_init() != ESP_OK) {
-    Serial.println("[ERR] ESP-NOW init falló");
+    Serial.println("[ERR] ESP-NOW init");
     return;
   }
-  Serial.println("[OK] ESP-NOW inicializado");
   
   // Registrar callbacks
   esp_now_register_send_cb(onESPNowSend);
   esp_now_register_recv_cb(onESPNowReceive);
   
-  // Agregar peer Alice
-  esp_now_peer_info_t peerAlice{};
+  // Agregar peers
+  esp_now_peer_info_t peerAlice = {};
   memcpy(peerAlice.peer_addr, aliceMAC, 6);
-  peerAlice.channel = channel;
+  peerAlice.channel = ESP_NOW_CHANNEL;
   peerAlice.encrypt = false;
   
-  if (esp_now_add_peer(&peerAlice) != ESP_OK) {
-    Serial.println("[ERR] No se pudo agregar peer Alice");
-    return;
-  }
-  Serial.println("[OK] Peer Alice agregado");
-  
-  // Agregar peer Bob
-  esp_now_peer_info_t peerBob{};
+  esp_now_peer_info_t peerBob = {};
   memcpy(peerBob.peer_addr, bobMAC, 6);
-  peerBob.channel = channel;
+  peerBob.channel = ESP_NOW_CHANNEL;
   peerBob.encrypt = false;
   
-  if (esp_now_add_peer(&peerBob) != ESP_OK) {
-    Serial.println("[ERR] No se pudo agregar peer Bob");
+  if (esp_now_add_peer(&peerAlice) != ESP_OK || esp_now_add_peer(&peerBob) != ESP_OK) {
+    Serial.println("[ERR] Agregar peers");
     return;
   }
-  Serial.println("[OK] Peer Bob agregado");
   
-  // Mostrar MACs esperadas
-  Serial.println("\n=== MACs Configuradas ===");
+  Serial.println("[OK] ESP-NOW configurado");
   Serial.print("Alice: ");
   for(int i = 0; i < 6; i++) {
     Serial.printf("%02X", aliceMAC[i]);
@@ -327,30 +334,42 @@ void setup() {
     Serial.printf("%02X", bobMAC[i]);
     if(i < 5) Serial.print(":");
   }
-  Serial.println("\n========================\n");
+  Serial.println();
   
-  Serial.println("Configuración inicial completa.");
+  // Verificar tamaños de estructuras
+  Serial.printf("\n[Central] sizeof(CommandData): %d bytes\n", sizeof(CommandData));
+  Serial.printf("[Central] sizeof(ResponseData): %d bytes\n", sizeof(ResponseData));
+  Serial.printf("[Central] sizeof(ManualMoveCommand): %d bytes\n\n", sizeof(ManualMoveCommand));
   
-  // Enviar ping inicial a Alice y Bob para detectar conexión
-  Serial.println("\n=== Enviando PING inicial ===");
-  delay(2000);  // Esperar a que Alice/Bob terminen su setup
   
-  Serial.println("Enviando PING a Alice...");
-  sendCommandToAlice(CMD_PING, 0);
+  // Enviar ping inicial a Alice y Bob
+  Serial.println("\n=== Detectando dispositivos ===");
+  delay(1000);  // Esperar configuración de Alice/Bob
   
-  Serial.println("Enviando PING a Bob...");
-  sendCommandToBob(CMD_PING, 0);
-  
-  Serial.println("Esperando respuestas (2 segundos)...");
-  unsigned long pingStart = millis();
-  while(millis() - pingStart < 2000) {
-    delay(50);  // Dar tiempo a que lleguen las respuestas
+  // Enviar PING con más reintentos y mayor espaciado
+  for(int i = 0; i < 5 && !aliceConnected; i++) {
+    Serial.printf("Ping Alice intento %d/5...\n", i+1);
+    sendCommandToAlice(CMD_PING, 0);
+    delay(500);
   }
   
-  Serial.println("\n=== Estado de conexión ===");
-  Serial.printf("Alice: %s\n", aliceConnected ? "✓ CONECTADA" : "✗ NO DETECTADA");
-  Serial.printf("Bob:   %s\n", bobConnected ? "✓ CONECTADO" : "✗ NO DETECTADO");
-  Serial.println("========================\n");
+  for(int i = 0; i < 5 && !bobConnected; i++) {
+    Serial.printf("Ping Bob intento %d/5...\n", i+1);
+    sendCommandToBob(CMD_PING, 0);
+    delay(500);
+  }
+  
+  // Esperar respuestas con timeout más largo
+  Serial.println("Esperando respuestas...");
+  unsigned long pingStart = millis();
+  while(millis() - pingStart < 5000 && (!aliceConnected || !bobConnected)) {
+    delay(10);
+  }
+  
+  Serial.println("\n=== Estado ===");
+  Serial.printf("Alice: %s\n", aliceConnected ? "✓" : "✗");
+  Serial.printf("Bob:   %s\n", bobConnected ? "✓" : "✗");
+  Serial.println("==============\n");
 }
 
 
@@ -375,6 +394,8 @@ void loop() {
 
   // Verificar si se recibió el mensaje de finalización de transmisión
   if (tx_ended_received) {
+    Serial.printf("\n[PROTOCOLO] Finalizado en pulso %d de %d\n", currentPulseNum, totalPulses);
+    Serial.println("[FPGA] TX_ENDED_ID recibido - Protocolo completado correctamente");
     sendDataToWeb();
     abortarProtocolo();
     tx_ended_received = false;
@@ -387,61 +408,51 @@ void loop() {
 // ==============================================
 
 void onESPNowSend(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  // Callback de envío (opcional para depuración)
+  // Optimizado: Callback vacío para máxima velocidad (errores visibles en timeout)
+  // Si se necesita debug, descomentar línea siguiente:
+  // if (status != ESP_NOW_SEND_SUCCESS) Serial.printf("[TX ERR] %d\n", status);
 }
 
 void onESPNowReceive(const uint8_t *mac_addr, const uint8_t *data, int len) {
-  // Debug: mostrar MAC recibida
-  Serial.print("[ESP-NOW RX] MAC recibida: ");
-  for(int i = 0; i < 6; i++) {
-    Serial.printf("%02X", mac_addr[i]);
-    if(i < 5) Serial.print(":");
-  }
-  Serial.printf(" | Tamaño: %d bytes\n", len);
+  // Optimizado: Eliminado Serial.printf para reducir latencia en callback crítico
   
   if(len != sizeof(ResponseData)) {
-    Serial.printf("[WARN] Tamaño incorrecto. Esperado: %d, Recibido: %d\n", sizeof(ResponseData), len);
-    return;
+    return;  // Error silencioso - callback debe ser rápido
   }
   
   ResponseData response;
   memcpy(&response, data, sizeof(response));
   
-  // Determinar si es de Alice o Bob comparando MAC
+  // Determinar origen comparando MAC
   bool isAlice = (memcmp(mac_addr, aliceMAC, 6) == 0);
   bool isBob = (memcmp(mac_addr, bobMAC, 6) == 0);
-  const char* source = isAlice ? "Alice" : (isBob ? "Bob" : "DESCONOCIDO");
   
-  Serial.printf("[DEBUG] Comparación MAC: isAlice=%d, isBob=%d\n", isAlice, isBob);
-  
-  // Actualizar flags de conexión y encender LEDs
+  // Actualizar LEDs de conexión (solo primera vez)
   if(isAlice && !aliceConnected) {
     aliceConnected = true;
     digitalWrite(LED_ALICE_PIN, HIGH);
-    Serial.println("✓✓✓ [LED ROJO ON] Alice conectada ✓✓✓");
-    Serial.printf("Pin %d = HIGH\n", LED_ALICE_PIN);
+    Serial.println("[✓] Alice conectada");
   } else if(isBob && !bobConnected) {
     bobConnected = true;
     digitalWrite(LED_BOB_PIN, HIGH);
-    Serial.println("✓✓✓ [LED AZUL ON] Bob conectado ✓✓✓");
-    Serial.printf("Pin %d = HIGH\n", LED_BOB_PIN);
+    Serial.println("[✓] Bob conectado");
   }
   
-  Serial.printf("[ESP-NOW] Respuesta de %s: status=%d, pulso=%d\n", 
-                source, response.status, response.pulseNum);
-  
+  // Procesar respuesta según estado
   switch(response.status) {
     case STATUS_PONG:
-      // Respuesta al ping - no hacer nada más que confirmar conexión
-      Serial.printf("[%s] PONG recibido - Conexión verificada\n", source);
+      // Ping confirmado - silencioso
       break;
+      
     case STATUS_HOME_COMPLETE:
       if(isAlice) {
         aliceHomed = true;
-        Serial.println("[Alice] Homing completado");
+        Serial.println("[Alice] HOME OK");
+        Serial.printf("[DEBUG] aliceHomed=%d, bobHomed=%d\n", aliceHomed, bobHomed);
       } else {
         bobHomed = true;
-        Serial.println("[Bob] Homing completado");
+        Serial.println("[Bob] HOME OK");
+        Serial.printf("[DEBUG] aliceHomed=%d, bobHomed=%d\n", aliceHomed, bobHomed);
       }
       break;
       
@@ -451,50 +462,61 @@ void onESPNowReceive(const uint8_t *mac_addr, const uint8_t *data, int len) {
         baseAlice = response.base;
         bitAlice = response.bit;
         angleAlice = response.angle;
-        Serial.printf("[Alice] READY - Base:%d Bit:%d Ángulo:%.2f\n", 
-                      baseAlice, bitAlice, angleAlice);
+        Serial.printf("[Alice] READY #%d B:%d b:%d A:%.1f\n", 
+                      response.pulseNum, baseAlice, bitAlice, angleAlice);
       } else {
         bobReady = true;
         baseBob = response.base;
         angleBob = response.angle;
-        Serial.printf("[Bob] READY - Base:%d Ángulo:%.2f\n", 
-                      baseBob, angleBob);
+        Serial.printf("[Bob] READY #%d B:%d A:%.1f\n", 
+                      response.pulseNum, baseBob, angleBob);
       }
       break;
       
     case STATUS_ERROR:
-      Serial.printf("[ERROR] %s reportó un error en pulso %d\n", source, response.pulseNum);
+      Serial.printf("[ERROR] %s - Pulso %d\n", isAlice ? "Alice" : "Bob", response.pulseNum);
       break;
   }
 }
 
 void sendCommandToAlice(uint8_t cmd, uint32_t pulseNum) {
-  CommandData command;
-  command.cmd = cmd;
-  command.pulseNum = pulseNum;
-  command.totalPulses = totalPulses;
-  
+  CommandData command = {cmd, pulseNum, totalPulses};
   esp_err_t result = esp_now_send(aliceMAC, (uint8_t*)&command, sizeof(command));
   
-  if(result == ESP_OK) {
-    Serial.printf("[→ Alice] Comando %d enviado (pulso %d)\n", cmd, pulseNum);
-  } else {
-    Serial.printf("[ERR] Error enviando a Alice: %d\n", result);
+  if(result != ESP_OK) {
+    Serial.printf("[Alice TX ERR] %d\n", result);
   }
 }
 
 void sendCommandToBob(uint8_t cmd, uint32_t pulseNum) {
-  CommandData command;
-  command.cmd = cmd;
-  command.pulseNum = pulseNum;
-  command.totalPulses = totalPulses;
+  CommandData command = {cmd, pulseNum, totalPulses};
+  esp_err_t result = esp_now_send(bobMAC, (uint8_t*)&command, sizeof(command));
   
+  if(result != ESP_OK) {
+    Serial.printf("[Bob TX ERR] %d\n", result);
+  }
+}
+
+// Funciones para movimiento manual
+void sendManualMoveToAlice(float angle) {
+  ManualMoveCommand command = {CMD_MOVE_MANUAL, angle, 0};
+  esp_err_t result = esp_now_send(aliceMAC, (uint8_t*)&command, sizeof(command));
+  
+  if(result == ESP_OK) {
+    Serial.printf("[Manual] Alice -> %.2f°\n", angle);
+  } else {
+    Serial.printf("[Alice Manual TX ERR] %d\n", result);
+  }
+}
+
+void sendManualMoveToBob(float angle) {
+  ManualMoveCommand command = {CMD_MOVE_MANUAL, angle, 0};
   esp_err_t result = esp_now_send(bobMAC, (uint8_t*)&command, sizeof(command));
   
   if(result == ESP_OK) {
-    Serial.printf("[→ Bob] Comando %d enviado (pulso %d)\n", cmd, pulseNum);
+    Serial.printf("[Manual] Bob -> %.2f°\n", angle);
   } else {
-    Serial.printf("[ERR] Error enviando a Bob: %d\n", result);
+    Serial.printf("[Bob Manual TX ERR] %d\n", result);
   }
 }
 
@@ -596,6 +618,9 @@ void sendDataToWeb() {
 void enviarConfiguracion(uint32_t num_pulsos, uint32_t duracion_us) {
   uint32_t dead_time_us = 0x000FFF;  // Dead time por defecto
   if (!start_protocol) {
+      // Guardar el número total de pulsos configurados
+      totalPulses = num_pulsos;
+      
       Serial.println("\n=== Iniciando configuración a FPGA ===");
       Serial.printf("Número de pulsos: %u\n", num_pulsos);
       Serial.printf("Duración (us): %u\n", duracion_us);
@@ -621,14 +646,28 @@ void enviarConfiguracion(uint32_t num_pulsos, uint32_t duracion_us) {
 
       Serial.println("=== Configuración enviada completamente ===\n");
 
-      // Enviar comando de homing a ambos motores
+      // Enviar comando de homing a ambos motores (reinicia flags internamente)
       sendHomingCommand();
       
       // Esperar a que ambos completen el homing (flags set by onESPNowReceive)
       Serial.println("Esperando homing de motores...");
+      Serial.printf("[DEBUG ANTES] aliceHomed=%d, bobHomed=%d\n", aliceHomed, bobHomed);
+      
       unsigned long homingTimeout = millis();
       while ((!aliceHomed || !bobHomed) && millis() - homingTimeout < 30000) {
-        delay(100);  // ESP-NOW callbacks handle responses asynchronously
+        // Procesar eventos del servidor y websocket para que los callbacks funcionen
+        server.handleClient();
+        webSocket.loop();
+        yield();  // Permitir que se ejecuten los callbacks ESP-NOW
+        delay(10);  // Pequeña pausa para no saturar el CPU
+        
+        // Debug cada segundo
+        static unsigned long lastDebug = 0;
+        if (millis() - lastDebug > 1000) {
+          Serial.printf("[DEBUG WAIT] aliceHomed=%d, bobHomed=%d (%.1fs)\n", 
+                        aliceHomed, bobHomed, (millis() - homingTimeout) / 1000.0);
+          lastDebug = millis();
+        }
       }
       
       if (aliceHomed && bobHomed) {
@@ -699,14 +738,32 @@ void handleWebSocketMessage(uint8_t num, uint8_t* payload, size_t length) {
         return;
     }
 
-    // Parsear el mensaje JSON para la configuración del protocolo
+    // Parsear el mensaje JSON
     StaticJsonDocument<200> doc;
     DeserializationError error = deserializeJson(doc, message);
 
     if (!error) {
+        // Verificar si es comando de movimiento manual
+        if (doc.containsKey("type")) {
+            String type = doc["type"].as<String>();
+            
+            if (type == "MOVE_ALICE") {
+                float angle = doc["angle"];
+                sendManualMoveToAlice(angle);
+                webSocket.sendTXT(num, "Moviendo Alice a " + String(angle) + "°");
+                return;
+            }
+            else if (type == "MOVE_BOB") {
+                float angle = doc["angle"];
+                sendManualMoveToBob(angle);
+                webSocket.sendTXT(num, "Moviendo Bob a " + String(angle) + "°");
+                return;
+            }
+        }
+        
+        // Si no es comando manual, es configuración del protocolo
         uint32_t num_pulsos = doc["num_pulsos"];
         uint32_t duracion_us = doc["duracion_us"];
-        // Eliminada la línea que extraía dead_time_us
 
         if (num_pulsos <= 16777215 && duracion_us <= 16777215) {
             enviarConfiguracion(num_pulsos, duracion_us);
@@ -753,58 +810,54 @@ void generateNextPulseReady() {
 }
 
 void abortarProtocolo() {
-    if (start_protocol) {
-        Serial.println("\n=== Abortando protocolo ===");
-        resetCounters();
-        generateResetPulse();
-        
-        // Enviar comando de abortar a los Super Minis via ESP-NOW
-        sendCommandToAlice(CMD_ABORT, 0);
-        sendCommandToBob(CMD_ABORT, 0);
-        
-        start_protocol = false;
-        aliceReady = false;
-        bobReady = false;
-        aliceHomed = false;
-        bobHomed = false;
-        
-        // Apagar LEDs al abortar protocolo
-        aliceConnected = false;
-        bobConnected = false;
-        digitalWrite(LED_ALICE_PIN, LOW);
-        digitalWrite(LED_BOB_PIN, LOW);
-        Serial.println("[LEDs OFF] Conexiones reiniciadas");
-        
-        while (UARTFPGA.available() > 0) {
-            UARTFPGA.read();
-        }
-        delay(1);
-        Serial.println("=== Protocolo abortado ===\n");
+    if (!start_protocol) return;
+    
+    Serial.println("\n[ABORT] Deteniendo protocolo...");
+    resetCounters();
+    generateResetPulse();
+    
+    sendCommandToAlice(CMD_ABORT, 0);
+    sendCommandToBob(CMD_ABORT, 0);
+    
+    start_protocol = false;
+    aliceReady = false;
+    bobReady = false;
+    aliceHomed = false;
+    bobHomed = false;
+    aliceConnected = false;
+    bobConnected = false;
+    
+    digitalWrite(LED_ALICE_PIN, LOW);
+    digitalWrite(LED_BOB_PIN, LOW);
+    
+    while (UARTFPGA.available() > 0) {
+        UARTFPGA.read();
     }
+    Serial.println("[OK] Protocolo abortado\n");
 }
 
 void sendHomingCommand() {
-    Serial.println("Enviando comando HOME a Alice y Bob...");
+    Serial.println("[HOMING] Iniciando...");
     aliceHomed = false;
     bobHomed = false;
-    
     sendCommandToAlice(CMD_HOME, 0);
     sendCommandToBob(CMD_HOME, 0);
 }
 
 void waitForMotorsReady() {
-    Serial.println("Esperando a que ambos motores estén listos...");
     unsigned long timeout = millis();
     while ((!aliceReady || !bobReady) && millis() - timeout < 10000) {
-        delay(10);  // ESP-NOW maneja mensajes automáticamente en background
+        yield();  // Optimizado: yield() permite callbacks ESP-NOW sin bloqueo
     }
     
     if (aliceReady && bobReady) {
-        Serial.println("✓ Ambos motores listos");
+        // Motores listos (silencioso para no saturar serial)
     } else {
-        Serial.println("⚠ WARNING: Timeout esperando motores");
-        if (!aliceReady) Serial.println("  - Alice no está lista");
-        if (!bobReady) Serial.println("  - Bob no está listo");
+        Serial.printf("\n[ERROR CRÍTICO] Timeout esperando motores en pulso %d\n", currentPulseNum);
+        if (!aliceReady) Serial.println("  Alice no respondió");
+        if (!bobReady) Serial.println("  Bob no respondió");
+        Serial.println("[ABORT] Deteniendo protocolo por timeout\n");
+        if (!bobReady) Serial.println("  Bob timeout");
     }
 }
 
