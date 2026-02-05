@@ -11,7 +11,7 @@ Este repositorio contiene los recursos necesarios para configurar y manejar las 
 
 Primero se conecta el regulador LM2596 **(1)** y luego la fuente de alimentación externa DC **(2)**. El regulador fija el voltaje de entrada en un valor estable y seguro, el cual sirve de alimentación para los demás componentes del circuito.
 
-![Paso 1](docs/images/montaje_paso1.jpg)
+<img src="docs/images/montaje_paso1.jpg" alt="Paso 1" width="500">
 
 #### Paso 2: Ajuste del voltaje de salida del regulador
 
@@ -22,7 +22,7 @@ Con la fuente ya conectada, se verifica que el regulador entregue exactamente 5V
 - Con un destornillador de pala, se gira el trimmer del regulador **(4)** hasta que el multímetro muestre 5.0V
 - **No se debe conectar ningún otro componente hasta completar este ajuste**
 
-![Paso 2](docs/images/montaje_paso2.jpg)
+<img src="docs/images/montaje_paso2.jpg" alt="Paso 2" width="500">
 
 #### Paso 3: Ubicación de componentes
 
@@ -34,13 +34,13 @@ Una vez verificado el voltaje de salida del regulador, se desconecta la alimenta
 - Los **cables del sensor de efecto Hall (8)** (5V, GND, Señal)
 - Los **cables hacia los motores paso a paso (9)**, guiandose por los colores indicados sobre la placa.
 
-![Paso 3](docs/images/montaje_paso3.jpg)
+<img src="docs/images/montaje_paso3.jpg" alt="Paso 3" width="500">
 
 #### Ejemplo de montaje completo
 
 El montaje completo, sin los cables del motor y del sensor, debe verse de la siguiente manera:
 
-![Montaje con componentes ubicados](docs/images/montaje_con_componentes.jpg)
+<img src="docs/images/montaje_con_componentes.jpg" alt="Montaje con componentes ubicados" width="500">
 
 *Imagen de referencia mostrando la PCB con los componentes correctamente ubicados.*
 
