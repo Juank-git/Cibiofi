@@ -38,7 +38,7 @@ Si es la primera vez que se usa el dispositivo o si surgen problemas para cargar
 3. **Soltar** el botón BOOT después de 2 segundos
 4. La placa ahora debería estar en modo programación y lista para recibir código
 
-![Botón BOOT](include/boot_esp32-c3.jpg)
+<img src="include/boot_esp32-c3.jpg" alt="Botón BOOT" width="500">
 
 En descargas posteriores, este procedimiento generalmente no es necesario, ya que el ESP32-C3 entra automáticamente en modo programación.
 
