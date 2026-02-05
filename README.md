@@ -22,7 +22,7 @@ Con la fuente ya conectada, se verifica que el regulador entregue exactamente 5V
 - Con un destornillador de pala, se gira el trimmer del regulador **(4)** hasta que el multímetro muestre 5.0V
 - **No se debe conectar ningún otro componente hasta completar este ajuste**
 
-<img src="docs/images/montaje_paso2.jpg" alt="Paso 2" width="500">
+<img src="docs/images/montaje_paso2.jpg" alt="Paso 2" width="800">
 
 #### Paso 3: Ubicación de componentes
 
