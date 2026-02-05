@@ -86,7 +86,7 @@ O simplemente abre VS Code y usa `Archivo > Abrir Carpeta` para seleccionar la c
 Para obtener los cambios más recientes del repositorio:
 
 ```powershell
-git pull origin main
+git pull origin
 ```
 
 **Nota:** Cada carpeta del proyecto contiene instrucciones específicas sobre cómo cargar el código a los microcontroladores.
