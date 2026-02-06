@@ -19,7 +19,7 @@ En el contexto del protocolo BB84, cada placa (Alice y Bob) puede ser identifica
 
 - **Hardware:** ESP32-C3 Super Mini (esp32-c3-devkitm-1)
 - **Software:** 
-  - PlatformIO instalado en VS Code
+  - Extensión de PlatformIO instalada en VS Code
   - Cable USB tipo C para conectar la placa
 
 ## Cómo Cargar el Código a una Placa

@@ -31,8 +31,9 @@ WebSocketsServer webSocket = WebSocketsServer(81);
 // ESP-NOW - Comunicación con Alice y Bob
 // ==============================================
 
-// CONFIGURACIÓN: Canal WiFi/ESP-NOW (debe ser igual en Central, Alice y Bob)
-const int ESP_NOW_CHANNEL = 11;
+// Canal WiFi/ESP-NOW - Detectado automáticamente del router
+const int ESP_NOW_INITIAL_CHANNEL = 1;  // Canal inicial para sincronización
+int ESP_NOW_CHANNEL = ESP_NOW_INITIAL_CHANNEL;  // Se actualizará con el canal del router
 
 uint8_t aliceMAC[] = {0x0C,0x4E,0xA0,0x64,0xC0,0xB8};  // MAC de la Super Mini 1 (Alice)
 uint8_t bobMAC[] = {0x0C,0x4E,0xA0,0x64,0xC1,0x9C};     // MAC de la Super Mini 2 (Bob)
@@ -67,12 +68,13 @@ struct ResponseData {
 } __attribute__((packed));
 
 // Comandos
-#define CMD_PING 0x00          // Comando de ping para verificar conexión
-#define CMD_HOME 0x01
-#define CMD_PREPARE_PULSE 0x02
-#define CMD_ABORT 0x03
-#define CMD_START_PROTOCOL 0x04
-#define CMD_MOVE_MANUAL 0x05   // Nuevo comando para movimiento manual
+#define CMD_SET_CHANNEL 0x00   // Configurar canal WiFi (debe ser el primero)
+#define CMD_PING 0x01          // Comando de ping para verificar conexión
+#define CMD_HOME 0x02
+#define CMD_PREPARE_PULSE 0x03
+#define CMD_ABORT 0x04
+#define CMD_START_PROTOCOL 0x05
+#define CMD_MOVE_MANUAL 0x06   // Comando para movimiento manual
 
 // Estados (DEBEN coincidir con Alice/Bob)
 #define STATUS_PONG 0              // Respuesta al ping
@@ -143,8 +145,8 @@ void sendHomingCommand();
 void waitForMotorsReady();
 void onESPNowSend(const uint8_t *mac_addr, esp_now_send_status_t status);
 void onESPNowReceive(const uint8_t *mac_addr, const uint8_t *data, int len);
-void sendCommandToAlice(uint8_t cmd, uint32_t pulseNum = 0);
-void sendCommandToBob(uint8_t cmd, uint32_t pulseNum = 0);
+esp_err_t sendCommandToAlice(uint8_t cmd, uint32_t pulseNum = 0);
+esp_err_t sendCommandToBob(uint8_t cmd, uint32_t pulseNum = 0);
 void prepareNextPulse();
 
 // Helper para servir archivos SPIFFS de forma optimizada
@@ -234,16 +236,17 @@ void setup() {
   uint8_t wifiChannel;
   wifi_second_chan_t secondChannel;
   esp_wifi_get_channel(&wifiChannel, &secondChannel);
-  Serial.printf("Canal WiFi del router: %d\n", wifiChannel);
+  Serial.printf("Canal WiFi del router detectado: %d\n", wifiChannel);
   Serial.printf("Canal secundario: %d\n", secondChannel);
   
-  // CRÍTICO: Verificar que el router esté en el canal correcto
-  if (wifiChannel != ESP_NOW_CHANNEL) {
-    Serial.printf("\n*** ADVERTENCIA ***\n");
-    Serial.printf("Router en canal %d pero ESP-NOW configurado para canal %d\n", wifiChannel, ESP_NOW_CHANNEL);
-    Serial.printf("Configurar router en canal %d o cambiar ESP_NOW_CHANNEL en el código\n", wifiChannel);
-    Serial.printf("****************\n\n");
-  }
+  // Actualizar ESP_NOW_CHANNEL con el canal del router
+  ESP_NOW_CHANNEL = wifiChannel;
+  Serial.printf("ESP-NOW usará canal: %d\n", ESP_NOW_CHANNEL);
+  
+  // IMPORTANTE: Desconectar WiFi temporalmente para sincronización con Alice/Bob
+  Serial.println("\n⚠ Desconectando WiFi temporalmente para sincronizar dispositivos...");
+  WiFi.disconnect();
+  delay(500);
 
   // Configuración de archivos SPIFFS
   if (!SPIFFS.begin(true)) {
@@ -295,7 +298,10 @@ void setup() {
   Serial.println("\n=== Configurando ESP-NOW ===");
   
   esp_wifi_set_ps(WIFI_PS_NONE);
-  Serial.printf("Usando canal WiFi del router: %d\n", wifiChannel);
+  
+  // FASE 1: Cambiar a canal 1 para sincronizar con Alice/Bob
+  Serial.printf("Fase 1: Cambiando a canal %d (canal de sincronización)\n", ESP_NOW_INITIAL_CHANNEL);
+  esp_wifi_set_channel(ESP_NOW_INITIAL_CHANNEL, WIFI_SECOND_CHAN_NONE);
   
   if (esp_now_init() != ESP_OK) {
     Serial.println("[ERR] ESP-NOW init");
@@ -306,15 +312,15 @@ void setup() {
   esp_now_register_send_cb(onESPNowSend);
   esp_now_register_recv_cb(onESPNowReceive);
   
-  // Agregar peers
+  // Agregar peers en canal 1
   esp_now_peer_info_t peerAlice = {};
   memcpy(peerAlice.peer_addr, aliceMAC, 6);
-  peerAlice.channel = ESP_NOW_CHANNEL;
+  peerAlice.channel = ESP_NOW_INITIAL_CHANNEL;
   peerAlice.encrypt = false;
   
   esp_now_peer_info_t peerBob = {};
   memcpy(peerBob.peer_addr, bobMAC, 6);
-  peerBob.channel = ESP_NOW_CHANNEL;
+  peerBob.channel = ESP_NOW_INITIAL_CHANNEL;
   peerBob.encrypt = false;
   
   if (esp_now_add_peer(&peerAlice) != ESP_OK || esp_now_add_peer(&peerBob) != ESP_OK) {
@@ -322,7 +328,7 @@ void setup() {
     return;
   }
   
-  Serial.println("[OK] ESP-NOW configurado");
+  Serial.println("[OK] ESP-NOW iniciado en canal 1");
   Serial.print("Alice: ");
   for(int i = 0; i < 6; i++) {
     Serial.printf("%02X", aliceMAC[i]);
@@ -335,6 +341,67 @@ void setup() {
     if(i < 5) Serial.print(":");
   }
   Serial.println();
+  
+  // FASE 2: Enviar configuración de canal a Alice y Bob
+  Serial.printf("\nFase 2: Enviando configuración de canal %d a Alice y Bob...\n", ESP_NOW_CHANNEL);
+  delay(2000);  // Esperar que Alice/Bob estén listos
+  
+  // Enviar canal correcto (múltiples intentos)
+  int aliceOK = 0, bobOK = 0;
+  for(int i = 0; i < 8; i++) {
+    if(sendCommandToAlice(CMD_SET_CHANNEL, (uint32_t)ESP_NOW_CHANNEL) == ESP_OK) {
+      aliceOK++;
+      Serial.printf("  ✓ Alice intento %d/8\n", i+1);
+    }
+    if(sendCommandToBob(CMD_SET_CHANNEL, (uint32_t)ESP_NOW_CHANNEL) == ESP_OK) {
+      bobOK++;
+      Serial.printf("  ✓ Bob intento %d/8\n", i+1);
+    }
+    delay(400);
+  }
+  
+  Serial.printf("\nEnvíos exitosos: Alice=%d/8, Bob=%d/8\n", aliceOK, bobOK);
+  Serial.println("Esperando que Alice y Bob cambien de canal...");
+  delay(3000);
+  
+  // FASE 3: Cambiar Central al canal del router
+  Serial.printf("\nFase 3: Cambiando Central al canal %d del router\n", ESP_NOW_CHANNEL);
+  
+  // Eliminar peers actuales
+  esp_now_del_peer(aliceMAC);
+  esp_now_del_peer(bobMAC);
+  
+  // Cambiar al canal del router
+  esp_wifi_set_channel(ESP_NOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  
+  // Volver a agregar peers en el nuevo canal
+  peerAlice.channel = ESP_NOW_CHANNEL;
+  peerBob.channel = ESP_NOW_CHANNEL;
+  
+  if (esp_now_add_peer(&peerAlice) != ESP_OK || esp_now_add_peer(&peerBob) != ESP_OK) {
+    Serial.println("[ERR] Agregar peers en canal definitivo");
+    return;
+  }
+  
+  Serial.printf("[OK] ESP-NOW configurado en canal %d\n", ESP_NOW_CHANNEL);
+  
+  // FASE 4: Reconectar WiFi
+  Serial.println("\nFase 4: Reconectando WiFi...");
+  WiFi.begin(ssid, password);
+  int reconnectAttempts = 0;
+  while (WiFi.status() != WL_CONNECTED && reconnectAttempts < 20) {
+    delay(500);
+    Serial.print(".");
+    reconnectAttempts++;
+  }
+  
+  if(WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✓ WiFi reconectado");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\n✗ Error reconectando WiFi");
+  }
   
   // Verificar tamaños de estructuras
   Serial.printf("\n[Central] sizeof(CommandData): %d bytes\n", sizeof(CommandData));
@@ -479,22 +546,16 @@ void onESPNowReceive(const uint8_t *mac_addr, const uint8_t *data, int len) {
   }
 }
 
-void sendCommandToAlice(uint8_t cmd, uint32_t pulseNum) {
+esp_err_t sendCommandToAlice(uint8_t cmd, uint32_t pulseNum) {
   CommandData command = {cmd, pulseNum, totalPulses};
   esp_err_t result = esp_now_send(aliceMAC, (uint8_t*)&command, sizeof(command));
-  
-  if(result != ESP_OK) {
-    Serial.printf("[Alice TX ERR] %d\n", result);
-  }
+  return result;
 }
 
-void sendCommandToBob(uint8_t cmd, uint32_t pulseNum) {
+esp_err_t sendCommandToBob(uint8_t cmd, uint32_t pulseNum) {
   CommandData command = {cmd, pulseNum, totalPulses};
   esp_err_t result = esp_now_send(bobMAC, (uint8_t*)&command, sizeof(command));
-  
-  if(result != ESP_OK) {
-    Serial.printf("[Bob TX ERR] %d\n", result);
-  }
+  return result;
 }
 
 // Funciones para movimiento manual

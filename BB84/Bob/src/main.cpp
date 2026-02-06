@@ -36,8 +36,10 @@ int   microsteps     = 4;
 // Valores comunes: 52(13dBm), 78(19.5dBm), 84(21dBm - máxima potencia)
 int   wifiTxPower = 34;  // ESP32-C3 Super Mini funciona mejor con potencia moderada
 
-// canal WiFi/ESP-NOW (debe ser igual en Central, Alice y Bob)
-const int ESP_NOW_CHANNEL = 11;
+// Canal WiFi/ESP-NOW - se sincronizará automáticamente con el Central
+const int ESP_NOW_INITIAL_CHANNEL = 1;  // Canal inicial para recibir configuración
+int ESP_NOW_CHANNEL = ESP_NOW_INITIAL_CHANNEL;  // Canal actual (se actualizará automáticamente)
+bool channelConfigured = false;  // Flag de sincronización de canal
 
 // MAC del ESP32 Central (se aprenderá automáticamente)
 uint8_t centralMAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -52,10 +54,11 @@ AccelStepper stepper = AccelStepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 // ==============================================
 // Comandos desde el ESP32 Central
 enum Command {
-  CMD_PING = 0,          // Ping para verificar conexión
-  CMD_HOME = 1,
-  CMD_PREPARE_PULSE = 2,
-  CMD_ABORT = 3
+  CMD_SET_CHANNEL = 0,   // Configurar canal WiFi (debe ser el primero)
+  CMD_PING = 1,          // Ping para verificar conexión
+  CMD_HOME = 2,
+  CMD_PREPARE_PULSE = 3,
+  CMD_ABORT = 4
 };
 
 struct CommandData {
@@ -283,6 +286,24 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     CommandData cmd;
     memcpy(&cmd, incomingData, sizeof(cmd));
     
+    // [PRIORIDAD] Configuración de canal (debe procesarse primero)
+    if (cmd.cmd == CMD_SET_CHANNEL && !channelConfigured) {
+        int newChannel = cmd.pulseNum;  // El canal viene en pulseNum
+        Serial.printf("[Bob] Configurando canal: %d\n", newChannel);
+        
+        // Cambiar canal WiFi
+        esp_wifi_set_channel(newChannel, WIFI_SECOND_CHAN_NONE);
+        ESP_NOW_CHANNEL = newChannel;
+        channelConfigured = true;
+        
+        Serial.printf("[Bob] ✓ Canal sincronizado: %d\n", ESP_NOW_CHANNEL);
+        
+        // Enviar confirmación al Central
+        ResponseData response = {STATUS_PONG, (uint32_t)newChannel, 0, 0, 0.0};
+        esp_now_send(mac, (uint8_t*)&response, sizeof(response));
+        return;
+    }
+    
     // Registro automático del Central (primera vez)
     if (!centralRegistered) {
         // Copiar MAC del remitente
@@ -347,11 +368,13 @@ void setup() {
     WiFi.mode(WIFI_STA);
     esp_wifi_set_ps(WIFI_PS_NONE);
     esp_wifi_set_max_tx_power(wifiTxPower);
-    esp_wifi_set_channel(ESP_NOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+    
+    // Iniciar en canal predeterminado (será actualizado por Central)
+    esp_wifi_set_channel(ESP_NOW_INITIAL_CHANNEL, WIFI_SECOND_CHAN_NONE);
     
     Serial.print("[Bob] MAC: ");
     Serial.println(WiFi.macAddress());
-    Serial.printf("[Bob] Canal: %d\n", ESP_NOW_CHANNEL);
+    Serial.printf("[Bob] Canal inicial: %d (esperando configuración del Central)\n", ESP_NOW_INITIAL_CHANNEL);
     
     // Inicializar ESP-NOW
     if (esp_now_init() != ESP_OK) {
