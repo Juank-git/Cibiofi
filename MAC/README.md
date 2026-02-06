@@ -17,16 +17,17 @@ En el contexto del protocolo BB84, cada placa (Alice y Bob) puede ser identifica
 
 ## Requisitos
 
-- **Hardware:** ESP32-C3 Super Mini (esp32-c3-devkitm-1)
+- **Hardware:** 
+  - ESP32-C3 Super Mini (esp32-c3-devkitm-1)
+  - Cable USB tipo C para conectar la placa
 - **Software:** 
   - Extensión de PlatformIO instalada en VS Code
-  - Cable USB tipo C para conectar la placa
 
 ## Cómo Cargar el Código a una Placa
 
 **⚠️ IMPORTANTE - Evitar Cortocircuito:**
 
-Antes de cargar código mediante USB, se debe **desconectar el ESP32-C3 de la PCB**. La PCB proporciona alimentación de 5V al pin VIN del microcontrolador. Si se conecta el cable USB mientras el ESP32-C3 está en la PCB, habrá dos fuentes de alimentación simultáneas (USB y PCB), lo que puede causar:
+Antes de cargar código mediante USB, se debe **desconectar el ESP32-C3 de la PCB**. La PCB proporciona una alimentación de 5V al pin VIN del microcontrolador. Si se conecta el cable USB mientras el ESP32-C3 está en la PCB, habrá dos fuentes de alimentación simultáneas (USB y PCB), lo que puede causar:
 
 - ⚡ Cortocircuito entre las fuentes de alimentación
 - 💥 Daño permanente al ESP32-C3 o a la PCB
@@ -86,17 +87,19 @@ Una vez cargado el código, el monitor serial mostrará algo similar a:
 
 ```
 === DIRECCIÓN MAC ===
-String: 0C:4E:A0:65:48:XX
-Array:  {0x0C, 0x4E, 0xA0, 0x65, 0x48, 0xXX}
+String: 0C:4E:A0:XX:XX:XX
+Array:  {0x0C, 0x4E, 0xA0, 0xXX, 0xXX, 0xXX}
 ```
 
 **Importante:** Se debe anotar esta dirección MAC y etiquetar físicamente la placa para futuras referencias.
 
 ## Repetir para Múltiples Placas
 
+**⚠️ Importante:** Conectar solo **un microcontrolador a la vez** para evitar interferencias en los puertos de comunicación y asegurar que el código se cargue en la placa correcta.
+
 Si se necesita obtener la dirección MAC de varias placas:
 
-1. Se desconecta la placa actual
+1. Se desconecta la placa actual del puerto USB
 2. Se conecta la siguiente placa
 3. Se ejecuta nuevamente el comando del Paso 3
 4. Se anota la nueva dirección MAC

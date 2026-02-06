@@ -48,14 +48,14 @@ El montaje completo, sin los cables del motor y del sensor, debe verse de la sig
 
 ## Clonar el Repositorio en tu Equipo Local
 
-Para tener acceso a todos los archivos del proyecto en tu computadora local.
+Para tener acceso a todos los proyectos en tu computadora local.
 
 ### Prerrequisitos
 - Git instalado en tu sistema ([descargar aquí](https://git-scm.com/download/win))
 
 ### Pasos para Clonar
 
-**1. Abre una terminal (PowerShell o CMD) y navega a la carpeta donde quieres guardar el proyecto:**
+**1. Abre una terminal (PowerShell o CMD) y navega a la carpeta donde quieres guardar el repositorio con los proyectos:**
 
 ```powershell
 cd C:\Users\TU_USUARIO\Desktop
