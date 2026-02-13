@@ -27,9 +27,9 @@
 #define GEAR_RATIO 3.0
 
 // Motor parameters
-int   stepperCurrent = 500;   // mA
+int   stepperCurrent = 600;   // mA (incrementado para mejor torque)
 int   stepperSpeed   = 4000;  // steps/s
-int   stepperAcc     = 25000; // steps/s^2
+int   stepperAcc     = 18000; // steps/s^2 (reducido de 25000 para estabilidad)
 int   microsteps     = 4;
 
 // WiFi TX power (valores válidos: 8-84, donde 8=2dBm, 84=21dBm, unidad=0.25dBm)
@@ -48,6 +48,21 @@ bool centralRegistered = false;
 // Driver + stepper
 TMC2130Stepper driver = TMC2130Stepper(SPI_CS, SPI_MOSI, SPI_MISO, SPI_SCLK);
 AccelStepper stepper = AccelStepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
+
+// ==============================================
+// Sistema de Cola de Comandos (evita bloqueo en callback)
+// ==============================================
+struct PendingCommand {
+  uint8_t cmd;
+  uint32_t pulseNum;
+  bool pending;
+};
+
+PendingCommand pendingCmd = {0, 0, false};
+volatile bool abortRequested = false;
+
+// Flag de optimización: desactivar logging durante protocolo activo
+bool protocolActive = false;
 
 // ==============================================
 // ESTRUCTURAS ESP-NOW
@@ -125,49 +140,46 @@ float getCurrentAngle() {
 // Rutina de homing
 void performHoming() {
     Serial.println("[Bob] Iniciando homing...");
-    Serial.printf("[Bob] Posición actual antes de homing: %ld pasos\n", stepper.currentPosition());
     
-    // Configurar el pin del sensor Hall con pull-up (ya que es de colector abierto)
+    // Reset abort flag
+    abortRequested = false;
+    
+    // Configurar el pin del sensor Hall
     pinMode(HALL_SENSOR_PIN, INPUT);
-    
-    // Leer estado inicial del sensor
     int initialState = digitalRead(HALL_SENSOR_PIN);
-    Serial.printf("[Bob] Estado inicial sensor Hall (pin %d): %d\n", HALL_SENSOR_PIN, initialState);
     
     // Reiniciar flag de interrupción
     hallTriggered = false;
     
-    // Habilitar interrupción en el pin del sensor: se dispara en flanco descendente (cuando el sensor pasa a LOW)
+    // Habilitar interrupción en el pin del sensor
     attachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN), hallISR, FALLING);
-    Serial.println("[Bob] Interrupción configurada en modo FALLING");
     
-    // Configurar alta aceleración y velocidad para el giro rápido
-    stepper.setMaxSpeed(5500);
-    stepper.setAcceleration(50000);
+    // Configurar aceleración y velocidad para el giro rápido (reducidas para estabilidad)
+    stepper.setMaxSpeed(4500);     // Reducido de 5500 para evitar trabado
+    stepper.setAcceleration(18000); // Reducido de 50000 para aceleración ajustada
     
     // Calcular el número de pasos correspondientes a 360°
     long stepsFor360 = (long)round((SM_RESOLUTION * microsteps * GEAR_RATIO));
-    Serial.printf("[Bob] Pasos por vuelta: %ld (iniciando búsqueda en 3 vueltas)\n", stepsFor360);
     
     // Iniciar movimiento continuo: dar vuelta completa hasta detectar el imán positivo
     stepper.moveTo(stepper.currentPosition() + stepsFor360 * 3);
     
     // Si el sensor ya está activado (LOW), primero alejarse hasta que esté desactivado (HIGH)
     if (initialState == LOW) {
-        Serial.println("[Bob] Sensor ya activado, alejándose primero...");
+        Serial.println("[Bob] Sensor ya activado, alejándose...");
         detachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN));
         
-        // Avanzar hasta que el sensor se desactive
+        // Avanzar hasta que el sensor se desactive (OPTIMIZADO: con yield())
         int steps = 0;
         while (digitalRead(HALL_SENSOR_PIN) == LOW && steps < 500) {
             stepper.moveTo(stepper.currentPosition() + 1);
             while (stepper.distanceToGo() != 0) {
                 stepper.run();
+                yield();  // CRÍTICO: Permitir ESP-NOW durante alejamiento
             }
             steps++;
+            yield();
         }
-        
-        Serial.printf("[Bob] Sensor desactivado después de %d pasos\n", steps);
         
         // Reiniciar flag y reconectar interrupción
         hallTriggered = false;
@@ -178,41 +190,65 @@ void performHoming() {
     }
     
     // Giro rápido hasta detectar el imán positivo mediante la interrupción
-    Serial.println("[Bob] Iniciando búsqueda del sensor Hall...");
-    
-    while (!hallTriggered) {
+    while (!hallTriggered && !abortRequested) {
         stepper.run();
+        yield();  // Permitir callbacks ESP-NOW
     }
     
-    // Registrar la posición en que se activó el sensor
-    long positionAtTrigger = stepper.currentPosition();
-    Serial.printf("[Bob] ✓ Sensor Hall detectado en posición: %ld\n", positionAtTrigger);
+    if (abortRequested) {
+        Serial.println("[Bob] Homing abortado");
+        detachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN));
+        stepper.stop();
+        return;
+    }
     
-    // Deshabilitar la interrupción para evitar activaciones adicionales
+    // Deshabilitar la interrupción y registrar posición
     detachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN));
+    long positionAtTrigger = stepper.currentPosition();
+    Serial.printf("[Bob] ✓ Sensor detectado: %ld\n", positionAtTrigger);
     
     // Calcular el número de pasos correspondientes a 345° (suponiendo SM_RESOLUTION * microsteps pasos por revolución)
     long stepsFor345 = (long)round((345.0 / 360.0) * (SM_RESOLUTION * microsteps * GEAR_RATIO));
     
     // Mover 345° adicionales desde el punto de detección
     stepper.moveTo(positionAtTrigger + stepsFor345);
-    while (stepper.distanceToGo() != 0) {
+    while (stepper.distanceToGo() != 0 && !abortRequested) {
         stepper.run();
         yield();
     }
     
-    Serial.println("[Bob] Aproximación fina: avanzando paso a paso...");
+    if (abortRequested) {
+        Serial.println("[Bob] Homing abortado en fase 345°");
+        stepper.stop();
+        return;
+    }
     
-    // Configurar parámetros para movimiento muy lento y preciso
-    stepper.setMaxSpeed(4000);
+    // Aproximación fina optimizada: avanzar en bloques pequeños para reducir overhead
+    stepper.setMaxSpeed(3000);  // Velocidad moderada para precisión sin ser excesivamente lento
     
-    // Avanzar paso a paso encuestando hasta que se active el sensor (cuando el imán positivo esté en posición)
-    while (digitalRead(HALL_SENSOR_PIN) == HIGH) {
-        stepper.moveTo(stepper.currentPosition() + 1);  // Mover 1 paso
-        while (stepper.distanceToGo() != 0) {
+    // Avanzar en bloques de 3 pasos (más eficiente que 1 paso) hasta activar sensor
+    while (digitalRead(HALL_SENSOR_PIN) == HIGH && !abortRequested) {
+        stepper.moveTo(stepper.currentPosition() + 3);  // Mover 3 pasos por iteración
+        while (stepper.distanceToGo() != 0 && !abortRequested) {
             stepper.run();
+            yield();
         }
         yield();
+    }
+    
+    // Ajuste fino final: retroceder 2 pasos para centrar mejor
+    if (!abortRequested) {
+        stepper.moveTo(stepper.currentPosition() - 2);
+        while (stepper.distanceToGo() != 0 && !abortRequested) {
+            stepper.run();
+            yield();
+        }
+    }
+    
+    if (abortRequested) {
+        Serial.println("[Bob] Homing abortado en fase fina");
+        stepper.stop();
+        return;
     }
     
     // Homing completado: establecer la posición actual (en pasos) como 0
@@ -235,24 +271,39 @@ void performHoming() {
 
 // Mover a ángulo específico
 void moveToAngle(float targetAngle) {
-    Serial.printf("[Bob] Moviendo a %.2f grados\n", targetAngle);
+    if (!protocolActive) {
+        Serial.printf("[Bob] Moviendo a %.2f grados\n", targetAngle);
+    }
     
+    abortRequested = false;
     long steps = angleToSteps(targetAngle);
     stepper.moveTo(steps);
     
-    while (stepper.distanceToGo() != 0) {
+    while (stepper.distanceToGo() != 0 && !abortRequested) {
         stepper.run();
         yield();
     }
     
-    float currentAngle = getCurrentAngle();
-    Serial.printf("[Bob] Movimiento completado - Posición: %.2f grados\n", currentAngle);
+    if (abortRequested) {
+        if (!protocolActive) {
+            Serial.println("[Bob] Movimiento abortado");
+        }
+        stepper.stop();
+        return;
+    }
+    
+    if (!protocolActive) {
+        float currentAngle = getCurrentAngle();
+        Serial.printf("[Bob] Movimiento completado - Posición: %.2f grados\n", currentAngle);
+    }
 }
 
 // Preparar para el siguiente pulso (selección aleatoria de base)
 void prepareForNextPulse(uint32_t pulseNum) {
     if (!isHomed) {
-        Serial.println("[Bob] ERROR: Not homed");
+        if (!protocolActive) {
+            Serial.println("[Bob] ERROR: Not homed");
+        }
         if (centralRegistered) {
             ResponseData response = {STATUS_ERROR, pulseNum, 0, 0, 0.0};
             esp_now_send(centralMAC, (uint8_t*)&response, sizeof(response));
@@ -266,13 +317,16 @@ void prepareForNextPulse(uint32_t pulseNum) {
     // Calcular ángulo objetivo
     currentTargetAngle = angulosRotacionBob[baseBob];
     
-    Serial.printf("[Bob] Pulso %d - Base:%d Ángulo:%.2f\n", 
-                  pulseNum, baseBob, currentTargetAngle);
+    // OPTIMIZADO: Solo loguear si no está en protocolo activo
+    if (!protocolActive) {
+        Serial.printf("[Bob] Pulso %d - Base:%d Ángulo:%.2f\n", 
+                      pulseNum, baseBob, currentTargetAngle);
+    }
     
     // Mover al ángulo
     moveToAngle(currentTargetAngle);
     
-    // Notificar que está listo vía ESP-NOW
+    // Notificar que está listo vía ESP-NOW (INMEDIATAMENTE)
     if (centralRegistered) {
         ResponseData response = {STATUS_READY, pulseNum, baseBob, 0, currentTargetAngle};
         esp_now_send(centralMAC, (uint8_t*)&response, sizeof(response));
@@ -280,31 +334,14 @@ void prepareForNextPulse(uint32_t pulseNum) {
 }
 
 // Callback ESP-NOW para comandos desde el Central
+// CRÍTICO: Este callback debe ser NO BLOQUEANTE
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     if (len != sizeof(CommandData)) return;
     
     CommandData cmd;
     memcpy(&cmd, incomingData, sizeof(cmd));
     
-    // [PRIORIDAD] Configuración de canal (debe procesarse primero)
-    if (cmd.cmd == CMD_SET_CHANNEL && !channelConfigured) {
-        int newChannel = cmd.pulseNum;  // El canal viene en pulseNum
-        Serial.printf("[Bob] Configurando canal: %d\n", newChannel);
-        
-        // Cambiar canal WiFi
-        esp_wifi_set_channel(newChannel, WIFI_SECOND_CHAN_NONE);
-        ESP_NOW_CHANNEL = newChannel;
-        channelConfigured = true;
-        
-        Serial.printf("[Bob] ✓ Canal sincronizado: %d\n", ESP_NOW_CHANNEL);
-        
-        // Enviar confirmación al Central
-        ResponseData response = {STATUS_PONG, (uint32_t)newChannel, 0, 0, 0.0};
-        esp_now_send(mac, (uint8_t*)&response, sizeof(response));
-        return;
-    }
-    
-    // Registro automático del Central (primera vez)
+    // [PRIORIDAD CRÍTICA] Registrar Central PRIMERO (antes de procesar cualquier comando)
     if (!centralRegistered) {
         // Copiar MAC del remitente
         memcpy(centralMAC, mac, 6);
@@ -333,28 +370,99 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
         }
     }
     
-    // Procesamiento rápido de comandos
-    switch (cmd.cmd) {
-        case CMD_PING: {
-            ResponseData response = {STATUS_PONG, 0, 0, 0, 0.0};
+    // [PRIORIDAD ALTA] Responder a PING inmediatamente
+    if (cmd.cmd == CMD_PING) {
+        Serial.println("[Bob] • PING recibido del Central, respondiendo PONG...");
+        ResponseData response = {STATUS_PONG, 0, 0, 0, 0.0};
+        esp_err_t result = esp_now_send(centralMAC, (uint8_t*)&response, sizeof(response));
+        if (result != ESP_OK) {
+            Serial.printf("[Bob] ✗ Error enviando PONG: %d\n", result);
+        }
+        return;  // Salir inmediatamente
+    }
+    
+    // [PRIORIDAD ALTA] Configuración de canal (debe procesarse SIEMPRE como PING)
+    if (cmd.cmd == CMD_SET_CHANNEL) {
+        int newChannel = cmd.pulseNum;  // El canal viene en pulseNum
+        
+        // Si ya está configurado, solo reenviar confirmación (idempotente)
+        if (channelConfigured && ESP_NOW_CHANNEL == newChannel) {
+            // Ya configurado - solo confirmar nuevamente
+            ResponseData response = {STATUS_PONG, (uint32_t)newChannel, 0, 0, 0.0};
             esp_now_send(centralMAC, (uint8_t*)&response, sizeof(response));
-            break;
+            return;
         }
         
+        // Primera vez: configurar canal
+        if (!channelConfigured) {
+            Serial.printf("[Bob] • Configurando canal: %d\n", newChannel);
+            
+            // CRÍTICO: Si el Central ya está registrado, actualizar su canal ANTES de cambiar
+            if (centralRegistered && esp_now_is_peer_exist(centralMAC)) {
+                esp_now_del_peer(centralMAC);
+            }
+            
+            // Cambiar canal WiFi
+            esp_wifi_set_channel(newChannel, WIFI_SECOND_CHAN_NONE);
+            ESP_NOW_CHANNEL = newChannel;
+            
+            // Re-registrar el Central con el nuevo canal
+            if (centralRegistered) {
+                esp_now_peer_info_t peerInfo = {};
+                memcpy(peerInfo.peer_addr, centralMAC, 6);
+                peerInfo.channel = newChannel;
+                peerInfo.encrypt = false;
+                
+                if (esp_now_add_peer(&peerInfo) == ESP_OK) {
+                    Serial.printf("[Bob] ✓ Central re-registrado en canal %d\n", newChannel);
+                } else {
+                    Serial.println("[Bob] ✗ ERROR: No se pudo re-registrar Central");
+                }
+            }
+            
+            channelConfigured = true;
+            Serial.printf("[Bob] ✓ Canal sincronizado: %d (confirmando...)\n", ESP_NOW_CHANNEL);
+        }
+        
+        // Enviar confirmación al Central
+        ResponseData response = {STATUS_PONG, (uint32_t)newChannel, 0, 0, 0.0};
+        esp_now_send(centralMAC, (uint8_t*)&response, sizeof(response));
+        return;
+    }
+    
+    // Comandos no críticos: agregar a cola (NO ejecutar aquí para evitar bloqueo)
+    switch (cmd.cmd) {
         case CMD_HOME:
-            Serial.println("[Bob] HOME");
-            performHoming();
+            Serial.println("[Bob] • Comando HOME recibido, encolando...");
+            pendingCmd.cmd = cmd.cmd;
+            pendingCmd.pulseNum = cmd.pulseNum;
+            pendingCmd.pending = true;
             break;
             
         case CMD_PREPARE_PULSE:
-            Serial.printf("[Bob] PREPARE #%d\n", cmd.pulseNum);
-            currentPulseNum = cmd.pulseNum;
-            prepareForNextPulse(cmd.pulseNum);
+            if (!protocolActive) {
+                Serial.printf("[Bob] • Comando PREPARE_PULSE #%d recibido\n", cmd.pulseNum);
+            }
+            pendingCmd.cmd = cmd.cmd;
+            pendingCmd.pulseNum = cmd.pulseNum;
+            pendingCmd.pending = true;
+            protocolActive = true;  // Activar modo rápido cuando empieza el protocolo
             break;
             
         case CMD_ABORT:
-            Serial.println("[Bob] ABORT");
+            Serial.println("[Bob] • Comando ABORT recibido, deteniendo motor...");
+            pendingCmd.cmd = cmd.cmd;
+            pendingCmd.pulseNum = cmd.pulseNum;
+            pendingCmd.pending = true;
+            abortRequested = true;
+            protocolActive = false;  // Desactivar modo rápido
             stepper.stop();
+            break;
+            
+        default:
+            if (!protocolActive) {
+                Serial.printf("[Bob] ⚠ Comando desconocido: 0x%02X\n", cmd.cmd);
+            }
             break;
     }
 }
@@ -390,10 +498,6 @@ void setup() {
     
     Serial.println("[Bob] ESP-NOW OK - Esperando conexión del Central");
     
-    // Verificar tamaños de estructuras
-    Serial.printf("[Bob] sizeof(CommandData): %d bytes\n", sizeof(CommandData));
-    Serial.printf("[Bob] sizeof(ResponseData): %d bytes\n", sizeof(ResponseData));
-    
     // Configurar pines y SPI
     pinMode(SPI_CS, OUTPUT);
     digitalWrite(SPI_CS, HIGH);
@@ -403,19 +507,27 @@ void setup() {
     digitalWrite(ENABLE_PIN, HIGH);
     
     SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI, SPI_CS);
-    delay(50);
+    delay(30);  // Reducido de 50ms
     
     // Inicializar TMC2130
     driver.begin();
-    delay(50);
+    delay(30);  // Reducido de 50ms
     digitalWrite(ENABLE_PIN, LOW);
     
     if (driver.test_connection()) {
         driver.rms_current(stepperCurrent);
-        driver.stealthChop(0);
-        driver.pwm_autoscale(true);
+        driver.stealthChop(0);        // SpreadCycle para mejor torque en alta velocidad
+        driver.pwm_autoscale(true);   // Ajuste automático de PWM
         driver.microsteps(microsteps);
-        Serial.println("[Bob] TMC2130 OK");
+        
+        // Configuración avanzada para reducir trabado en movimientos rápidos
+        driver.toff(4);               // Off time (duración apagado chopper) - balance velocidad/estabilidad
+        driver.blank_time(24);        // Tiempo de blanking (reduce ruido)
+        driver.hysteresis_start(3);   // Histéresis inicio
+        driver.hysteresis_end(1);     // Histéresis fin
+        driver.interpolate(true);     // Interpolación a 256 microsteps (suaviza movimiento)
+        
+        Serial.println("[Bob] TMC2130 OK (SpreadCycle + Interpolación)");
     } else {
         Serial.println("[Bob] ERROR: TMC2130");
     }
@@ -430,7 +542,36 @@ void setup() {
 }
 
 void loop() {
-    // Movimiento no bloqueante
-    stepper.run();
-    yield();  // Optimizado: yield() en lugar de delay(1) para mejor respuesta
+    // Procesar comandos pendientes de la cola
+    if (pendingCmd.pending) {
+        pendingCmd.pending = false;  // Marcar como procesándose
+        
+        switch (pendingCmd.cmd) {
+            case CMD_HOME:
+                Serial.println("[Bob] Ejecutando HOME");
+                performHoming();
+                break;
+                
+            case CMD_PREPARE_PULSE:
+                // OPTIMIZADO: Sin logging durante protocolo para máxima velocidad
+                if (!protocolActive) {
+                    Serial.printf("[Bob] Ejecutando PREPARE #%d\n", pendingCmd.pulseNum);
+                }
+                currentPulseNum = pendingCmd.pulseNum;
+                prepareForNextPulse(pendingCmd.pulseNum);
+                break;
+                
+            case CMD_ABORT:
+                Serial.println("[Bob] Ejecutando ABORT");
+                abortRequested = true;
+                stepper.stop();
+                break;
+        }
+    }
+    
+    // OPTIMIZADO: Movimiento no bloqueante solo si hay distancia por recorrer
+    if (stepper.distanceToGo() != 0) {
+        stepper.run();
+    }
+    yield();  // Permitir callbacks ESP-NOW
 }

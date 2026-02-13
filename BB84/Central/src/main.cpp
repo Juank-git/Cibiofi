@@ -13,10 +13,10 @@
 const char* ssid = "Loic";
 const char* password = "Loic1234";
 
-// IP estática
-IPAddress local_IP(192, 168, 137, 100);
-IPAddress gateway(192, 168, 137, 1);
-IPAddress subnet(255, 255, 255, 0);
+// IP estática - se calculará automáticamente basándose en la red del router
+IPAddress local_IP;
+IPAddress gateway;
+IPAddress subnet;
 
 WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
@@ -35,15 +35,8 @@ WebSocketsServer webSocket = WebSocketsServer(81);
 const int ESP_NOW_INITIAL_CHANNEL = 1;  // Canal inicial para sincronización
 int ESP_NOW_CHANNEL = ESP_NOW_INITIAL_CHANNEL;  // Se actualizará con el canal del router
 
-uint8_t aliceMAC[] = {0x0C,0x4E,0xA0,0x64,0xC0,0xB8};  // MAC de la Super Mini 1 (Alice)
-uint8_t bobMAC[] = {0x0C,0x4E,0xA0,0x64,0xC1,0x9C};     // MAC de la Super Mini 2 (Bob)
-
-//Bob: 0C:4E:A0:64:C1:9C
-/*
-uint8_t bobMAC[] = {0x0C,0x4E,0xA0,0x64,0xC0,0xB8};  // MAC de la Super Mini 1 (Alice)
-uint8_t aliceMAC[] = {0x0C,0x4E,0xA0,0x65,0x48,0x3C};     // MAC de la Super Mini 2 (Bob)
-*/
-
+uint8_t aliceMAC[] = {0x0C,0x4E,0xA0,0x65,0x48,0xCC};  // MAC de la Super Mini 1 (Alice)
+uint8_t bobMAC[] = {0x0C,0x4E,0xA0,0x65,0x48,0x80};     // MAC de la Super Mini 2 (Bob)
 
 // Estructuras de comunicación ESP-NOW
 struct CommandData {
@@ -91,6 +84,10 @@ bool bobHomed = false;
 // Flags de conexión (para LEDs)
 bool aliceConnected = false;
 bool bobConnected = false;
+
+// Flags de sincronización de canal (para Fase 2)
+bool aliceChannelConfigured = false;
+bool bobChannelConfigured = false;
 
 // Datos recibidos de Alice y Bob
 int baseAlice = 0;
@@ -219,16 +216,58 @@ void setup() {
   Serial.println("TEST LEDs completado");
   
   // ==============================================
-  // Configuración Wi-Fi
+  // Configuración Wi-Fi con IP automática terminada en .100
   // ==============================================
-  WiFi.mode(WIFI_AP_STA);  // Establecer modo híbrido ANTES de conectar
+  Serial.println("Conectando a Wi-Fi para detectar red...");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  
+  // Conectar primero con DHCP para obtener configuración de red
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nError: No se pudo conectar al WiFi");
+    return;
+  }
+  
+  Serial.println("\nConectado temporalmente con DHCP");
+  
+  // Obtener configuración de red del router
+  gateway = WiFi.gatewayIP();
+  subnet = WiFi.subnetMask();
+  
+  // Construir IP local con los primeros 3 octetos del gateway y .100 al final
+  local_IP = IPAddress(gateway[0], gateway[1], gateway[2], 100);
+  
+  Serial.printf("Red detectada: %s\n", gateway.toString().c_str());
+  Serial.printf("Configurando IP estática: %s\n", local_IP.toString().c_str());
+  
+  // Desconectar y reconectar con IP estática
+  WiFi.disconnect();
+  delay(500);
+  
+  WiFi.mode(WIFI_AP_STA);  // Modo híbrido para ESP-NOW
   WiFi.config(local_IP, gateway, subnet);
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Conectando a Wi-Fi...");
+  
+  attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
   }
-  Serial.println("Wi-Fi conectado.");
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nError: No se pudo reconectar con IP estática");
+    return;
+  }
+  
+  Serial.println("\nWi-Fi conectado con IP estática.");
   Serial.print("IP: ");
   Serial.println(WiFi.localIP());
   
@@ -342,27 +381,44 @@ void setup() {
   }
   Serial.println();
   
-  // FASE 2: Enviar configuración de canal a Alice y Bob
+  // FASE 2: Enviar configuración de canal a Alice y Bob (con confirmación)
   Serial.printf("\nFase 2: Enviando configuración de canal %d a Alice y Bob...\n", ESP_NOW_CHANNEL);
-  delay(2000);  // Esperar que Alice/Bob estén listos
+  delay(1500);  // Esperar que Alice/Bob estén listos
   
-  // Enviar canal correcto (múltiples intentos)
-  int aliceOK = 0, bobOK = 0;
-  for(int i = 0; i < 8; i++) {
-    if(sendCommandToAlice(CMD_SET_CHANNEL, (uint32_t)ESP_NOW_CHANNEL) == ESP_OK) {
-      aliceOK++;
-      Serial.printf("  ✓ Alice intento %d/8\n", i+1);
+  // Reset de flags de confirmación
+  aliceChannelConfigured = false;
+  bobChannelConfigured = false;
+  
+  // Enviar con reintentos inteligentes (máximo 4 intentos)
+  int aliceAttempts = 0, bobAttempts = 0;
+  for(int i = 0; i < 4 && (!aliceChannelConfigured || !bobChannelConfigured); i++) {
+    // Enviar solo a quien aún no ha confirmado
+    if(!aliceChannelConfigured) {
+      if(sendCommandToAlice(CMD_SET_CHANNEL, (uint32_t)ESP_NOW_CHANNEL) == ESP_OK) {
+        aliceAttempts++;
+        Serial.printf("  → Alice intento %d\n", i+1);
+      }
     }
-    if(sendCommandToBob(CMD_SET_CHANNEL, (uint32_t)ESP_NOW_CHANNEL) == ESP_OK) {
-      bobOK++;
-      Serial.printf("  ✓ Bob intento %d/8\n", i+1);
+    
+    if(!bobChannelConfigured) {
+      if(sendCommandToBob(CMD_SET_CHANNEL, (uint32_t)ESP_NOW_CHANNEL) == ESP_OK) {
+        bobAttempts++;
+        Serial.printf("  → Bob intento %d\n", i+1);
+      }
     }
-    delay(400);
+    
+    delay(300);  // Esperar respuesta
   }
   
-  Serial.printf("\nEnvíos exitosos: Alice=%d/8, Bob=%d/8\n", aliceOK, bobOK);
-  Serial.println("Esperando que Alice y Bob cambien de canal...");
-  delay(3000);
+  Serial.printf("\nResultado: Alice=%s (%d envíos), Bob=%s (%d envíos)\n", 
+                aliceChannelConfigured ? "✓" : "✗", aliceAttempts,
+                bobChannelConfigured ? "✓" : "✗", bobAttempts);
+  
+  if(!aliceChannelConfigured || !bobChannelConfigured) {
+    Serial.println("⚠ Advertencia: Algunos dispositivos no confirmaron. Continuando...");
+  }
+  
+  delay(1000);  // Tiempo adicional para cambio de canal
   
   // FASE 3: Cambiar Central al canal del router
   Serial.printf("\nFase 3: Cambiando Central al canal %d del router\n", ESP_NOW_CHANNEL);
@@ -508,7 +564,16 @@ void onESPNowReceive(const uint8_t *mac_addr, const uint8_t *data, int len) {
   // Procesar respuesta según estado
   switch(response.status) {
     case STATUS_PONG:
-      // Ping confirmado - silencioso
+      // Verificar si es confirmación de cambio de canal (pulseNum contiene el canal)
+      if(response.pulseNum == ESP_NOW_CHANNEL) {
+        if(isAlice && !aliceChannelConfigured) {
+          aliceChannelConfigured = true;
+          Serial.println("[✓] Alice confirmó canal " + String(ESP_NOW_CHANNEL));
+        } else if(isBob && !bobChannelConfigured) {
+          bobChannelConfigured = true;
+          Serial.println("[✓] Bob confirmó canal " + String(ESP_NOW_CHANNEL));
+        }
+      }
       break;
       
     case STATUS_HOME_COMPLETE:
@@ -529,14 +594,20 @@ void onESPNowReceive(const uint8_t *mac_addr, const uint8_t *data, int len) {
         baseAlice = response.base;
         bitAlice = response.bit;
         angleAlice = response.angle;
-        Serial.printf("[Alice] READY #%d B:%d b:%d A:%.1f\n", 
-                      response.pulseNum, baseAlice, bitAlice, angleAlice);
+        // OPTIMIZADO: Solo loguear si el protocolo no está activo
+        if (!start_protocol) {
+          Serial.printf("[Alice] READY #%d B:%d b:%d A:%.1f\n", 
+                        response.pulseNum, baseAlice, bitAlice, angleAlice);
+        }
       } else {
         bobReady = true;
         baseBob = response.base;
         angleBob = response.angle;
-        Serial.printf("[Bob] READY #%d B:%d A:%.1f\n", 
-                      response.pulseNum, baseBob, angleBob);
+        // OPTIMIZADO: Solo loguear si el protocolo no está activo
+        if (!start_protocol) {
+          Serial.printf("[Bob] READY #%d B:%d A:%.1f\n", 
+                        response.pulseNum, baseBob, angleBob);
+        }
       }
       break;
       
@@ -586,21 +657,14 @@ void prepareNextPulse() {
   bobReady = false;
   sendCommandToAlice(CMD_PREPARE_PULSE, currentPulseNum);
   sendCommandToBob(CMD_PREPARE_PULSE, currentPulseNum);
+  yield();  // OPTIMIZADO: Permitir procesamiento inmediato de respuestas ESP-NOW
 }
 
 // ==============================================
-// Funciones obsoletas (mantener compatibilidad)
+// Funciones obsoletas (ELIMINADAS - usar prepareNextPulse())
 // ==============================================
-
-void prepareAlice() {
-  // Obsoleta: Se usa prepareNextPulse() que llama a sendCommandToAlice()
-  sendCommandToAlice(CMD_PREPARE_PULSE, currentPulseNum);
-}
-
-void prepareBob() {
-  // Obsoleta: Se usa prepareNextPulse() que llama a sendCommandToBob()
-  sendCommandToBob(CMD_PREPARE_PULSE, currentPulseNum);
-}
+// prepareAlice() y prepareBob() fueron reemplazadas por prepareNextPulse()
+// que es más eficiente al resetear flags y añadir yield() automáticamente
 
 void checkUARTFPGAMessages() {
   static uint32_t lastPrintTime = 0;
@@ -740,8 +804,7 @@ void enviarConfiguracion(uint32_t num_pulsos, uint32_t duracion_us) {
         Serial.println("[LEDs OFF] Protocolo iniciado - Indicadores de conexión apagados");
         
         currentPulseNum = 0;
-        prepareAlice();
-        prepareBob();
+        prepareNextPulse();  // OPTIMIZADO: Reemplaza prepareAlice()+prepareBob()
         waitForMotorsReady();
         resetCounters();
         generateNextPulseReady();
@@ -887,6 +950,8 @@ void abortarProtocolo() {
     bobHomed = false;
     aliceConnected = false;
     bobConnected = false;
+    aliceChannelConfigured = false;
+    bobChannelConfigured = false;
     
     digitalWrite(LED_ALICE_PIN, LOW);
     digitalWrite(LED_BOB_PIN, LOW);
@@ -907,8 +972,12 @@ void sendHomingCommand() {
 
 void waitForMotorsReady() {
     unsigned long timeout = millis();
-    while ((!aliceReady || !bobReady) && millis() - timeout < 10000) {
-        yield();  // Optimizado: yield() permite callbacks ESP-NOW sin bloqueo
+    // OPTIMIZADO: Timeout reducido de 10s a 3s (los motores deberían responder en <1s)
+    while ((!aliceReady || !bobReady) && millis() - timeout < 3000) {
+        // OPTIMIZADO: Solo yield() sin delay - reduce latencia de ~3ms a ~0.01ms/ciclo
+        server.handleClient();  // Mantener WebSocket activo
+        webSocket.loop();
+        yield();  // Permitir callbacks ESP-NOW
     }
     
     if (aliceReady && bobReady) {
@@ -918,7 +987,6 @@ void waitForMotorsReady() {
         if (!aliceReady) Serial.println("  Alice no respondió");
         if (!bobReady) Serial.println("  Bob no respondió");
         Serial.println("[ABORT] Deteniendo protocolo por timeout\n");
-        if (!bobReady) Serial.println("  Bob timeout");
     }
 }
 
